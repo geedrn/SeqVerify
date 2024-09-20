@@ -4,11 +4,13 @@ import argparse
 import os
 import sys
 import configparser
+import shutil
 from seqver_functions import *
 from seqver_plots import *
 from seqver_genomeupdate import *
 from seqver_lofFinder import *
 from seqver_gtf import *
+import logging
 
 parser = argparse.ArgumentParser()
 
@@ -21,6 +23,7 @@ parser.add_argument('--untargeted', type=str, required=False, nargs='+') #Name/P
 parser.add_argument('--targeted', type=str, required=False) #Name/Path of command file instructing where to insert known-insertion transgenes
 parser.add_argument('--keepgoing',action='store_const',const=True,required=False,default=False) #continue to next part after completing
 parser.add_argument('--keep_temp', action='store_const',const=True, required=False, default=False) #HIGHLY RECOMMENDED - Option to delete temporary files when the pipeline is done
+parser.add_argument('--verbose', action='store_true', help='Enable verbose output') #Prints out more information about the pipeline's progress
 
 #Genome arguments
 parser.add_argument('--genome', type=str, required=False, default=f"{os.getcwd()}/seqverify_defaults/chm13v2.0.fa") #Name/Path of genome file (CHM13 recommended) used to perform everything but variant calling.
@@ -57,6 +60,16 @@ parser.add_argument('--config',type=str,required=False,default=None)
 
 args = parser.parse_args()
 
+def setup_logging():
+    logging.basicConfig(
+        filename='seqverify.log',
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+setup_logging()
+logging.info("SeqVerify execution starts...")
+
 if args.config is not None:
     config = configparser.ConfigParser(allow_no_value=True)
     config.read(args.config)
@@ -90,34 +103,69 @@ if args.config is not None:
 if args.download_defaults: #If --download_defaults is set, downloads the three databases and quits the program
     #Note:  These FTP links are likely to change over time and break the command. 
     #       Please open an issue on GitHub if they do! https://github.com/mpiersonsmela/SeqVerify
-    os.system('mkdir seqverify_defaults')
+    if not run_command('mkdir seqverify_defaults'):
+        print("Error: Failed to create folder seqverify_defaults")
+        sys.exit(1)
 
     #Downloads chm13v2.0 as a reference genome for everything except the variant calling
-    os.system('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz" --output-dir seqverify_defaults')
-    os.system('gunzip seqverify_defaults/chm13v2.0.fa.gz')
+    if not run_command('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz" --output-dir seqverify_defaults'):
+        print("Error: Failed to download chm13v2.0.fa.gz")
+        sys.exit(1)
+        
+    if not run_command('gunzip seqverify_defaults/chm13v2.0.fa.gz'):
+        print("Error: Failed to unzip chm13v2.0.fa.gz")
+        sys.exit(1)
 
     #Downloads chm13v2.0's gff3 file for gtf editing
-    os.system('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/annotation/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz" --output-dir seqverify_defaults')
-    os.system('gunzip seqverify_defaults/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz')
+    if not run_command('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/annotation/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz" --output-dir seqverify_defaults'):
+        print("Error: Failed to download chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz")
+        sys.exit(1)
+        
+    if not run_command('gunzip seqverify_defaults/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz'):
+        print("Error: Failed to unzip chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz")
+        sys.exit(1)
 
     #Downloads GRCh38 version 105 primary assembly (no alt contigs) as a reference genome for the variant calling
-    os.system('curl -OJX GET "https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz" --output-dir seqverify_defaults')
-    os.system('gunzip seqverify_defaults/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz')
+    if not run_command('curl -OJX GET "https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz" --output-dir seqverify_defaults'):
+        print("Error: Failed to download Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz")
+        sys.exit(1)
+        
+    if not run_command('gunzip seqverify_defaults/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz'):
+        print("Error: Failed to unzip Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz")
+        sys.exit(1)
 
     #Downloads a KRAKEN-valid 8GB database, PlusPF_8GB
-    os.system('mkdir seqverify_defaults/seqverify_database')
-    os.system('curl -OJX GET "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20230605.tar.gz" --output-dir seqverify_defaults')
-    os.system('tar -xzf seqverify_defaults/k2_pluspf_08gb_20230605.tar.gz -C seqverify_defaults/seqverify_database')
+    if not run_command('mkdir seqverify_defaults/seqverify_database'):
+        print("Error: Failed to make seqverify_defaults/seqverify_database directory")
+        sys.exit(1)
+        
+    if not run_command('curl -OJX GET "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20230605.tar.gz" --output-dir seqverify_defaults'):
+        print("Error: Failed to download kraken database")
+        sys.exit(1)
+        
+    if not run_command('tar -xzf seqverify_defaults/k2_pluspf_08gb_20230605.tar.gz -C seqverify_defaults/seqverify_database'):
+        print("Error: Failed to unzip kraken database")
+        sys.exit(1)
 
     #Downloads the snpEff config file for ease of access during variant calling
-    os.system('curl -OJX GET "https://raw.githubusercontent.com/pcingola/SnpEff/master/config/snpEff.config" --output-dir seqverify_defaults')
+    if not run_command('curl -OJX GET "https://raw.githubusercontent.com/pcingola/SnpEff/master/config/snpEff.config" --output-dir seqverify_defaults'):
+        print("Error: Failed to download snpEff.config")
+        sys.exit(1)
 
     #Downloads the latest version of the ClinVar database for variant calling purposes
-    os.system('curl -OJX GET "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz" --output-dir seqverify_defaults')
-    os.system('curl -OJX GET "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi" --output-dir seqverify_defaults')
-    os.system('gunzip seqverify_defaults/clinvar.vcf.gz')
+    if not run_command('curl -OJX GET "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz" --output-dir seqverify_defaults'):
+        print("Error: Failed to download clinvar.vcf.gz")
+        sys.exit(1)
+        
+    if not run_command('curl -OJX GET "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi" --output-dir seqverify_defaults'):
+        print("Error: Failed to download clinvar.vcf.gz.tbi")
+        sys.exit(1)
+        
+    if not run_command('gunzip seqverify_defaults/clinvar.vcf.gz'):
+        print("Error: Failed to unzip clinvar.vcf.gz")
+        sys.exit(1)
     
-    sys.exit(0)
+    sys.exit(1)
 
 output_name = args.output
 
@@ -182,16 +230,9 @@ if args.database is not None:
 
 if args.gtf is not None:
     gtf_file = pathFinder(args.gtf)
-    print(f"GTF file specified: {gtf_file}")
-    if os.path.exists(gtf_file):
-        print(f"GTF file exists at: {gtf_file}")
-    else:
-        print(f"Warning: GTF file not found at: {gtf_file}")
-else:
-    print("No GTF file specified")
     
-os.system(f'mkdir -p {folder}')
-os.system(f'mkdir -p {temp_folder}')    
+run_command(f'mkdir -p {folder}')
+run_command(f'mkdir -p {temp_folder}')    
 
 if exact_path is not None:
     commands = commandHandler(genome_source_path,exact_path,temp_folder,genome_with_markers,return_commands_only = False)
@@ -218,320 +259,601 @@ elif type(args.max_mem) == 'int':
 base_block = max_mem / 8
 #Set Java max mem for Java subprocesses (snpEff, etc)
 os.environ['_JAVA_OPTIONS'] = '-Xmx'+args.max_mem
-os.system('echo $_JAVA_OPTIONS')
+run_command('echo $_JAVA_OPTIONS')
 
 if args.start == "beginning" or args.start == "all":
     #Preliminary Work - Generates the output folders given a specified --output string as well as the temp folder for the pipeline to work within
-    os.system(f'mkdir -p {folder_insertion}')
+    if not run_command(f'mkdir -p {folder_insertion}'):
+        print(f"Error: Failed to create folder {folder_insertion}")
+        sys.exit(1)
+        
     #Automatic Preparation of Collated Genome:
     #Collates all markers/transgenes into a single FASTA file for ease of handling
     
-    print("started gtf")
-    print("Started GTF processing")
+    print("Merging transgenes into genome...")
+    logging.info("Automatically preparing collated genome")
     if args.gtf is not None:
-        print(f"GTF file specified: {gtf_file}")
-        if os.path.exists(gtf_file):
-            print(f"GTF file exists at: {gtf_file}")
+        logging.info(f"GTF file specified: {gtf_file}")
+        if check_file_exists(gtf_file):
+            logging.info(f"GTF file exists at: {gtf_file}")
             if exact_path is not None:
-                print("Exact path is specified. Proceeding with GTF editing.")
+                logging.info("Exact path is specified. Proceeding with GTF editing.")
+                print("GTF file specified. Proceeding with GTF editing.")
                 try:
-                    print(f"Attempting to edit GTF file: {gtf_file}")
-                    print(f"Using commands from: {exact_path}")
-                    print(f"Temporary folder: {temp_folder}")
-                    print(f"Insertion folder: {folder_insertion}")
-                    print(f"Unsorted GTF output: {new_gtf_unsorted}")
-                    print(f"Sorted GTF output: {new_gtf_sorted}")
+                    logging.info(f"Attempting to edit GTF file: {gtf_file}")
+                    logging.info(f"Using commands from: {exact_path}")
+                    logging.info(f"Temporary folder: {temp_folder}")
+                    logging.info(f"Insertion folder: {folder_insertion}")
+                    logging.info(f"Unsorted GTF output: {new_gtf_unsorted}")
+                    logging.info(f"Sorted GTF output: {new_gtf_sorted}")
                     
                     success = gtfEdit(gtf_file, commands, temp_folder, folder_insertion, new_gtf_unsorted, new_gtf_sorted)
                     
                     if success:
-                        print("GTF editing completed successfully")
-                        print(f"Check for output file: {folder_insertion}/{new_gtf_sorted}")
+                        logging.info("GTF editing completed successfully")
+                        logging.info(f"Check for output file: {folder_insertion}/{new_gtf_sorted}")
                     else:
-                        print("GTF editing failed")
+                        logging.info("GTF editing failed")
                 except Exception as e:
-                    print(f"Error during GTF editing: {str(e)}")
-                    print("Proceeding without edited GTF file.")
+                    logging.info(f"Error during GTF editing: {str(e)}")
+                    logging.info("Proceeding without edited GTF file.")
+                    print("Failed to edit GTF file. Proceeding without edited GTF file.")
             else:
-                print("Exact path is not specified (Targeted option is off). Copying GTF file without modifications.")
-                try:
-                    copy_command = f"cp {gtf_file} {folder_insertion}/{new_gtf_sorted}"
-                    os.system(copy_command)
-                    if os.path.exists(f"{folder_insertion}/{new_gtf_sorted}"):
-                        print(f"GTF file copied to: {folder_insertion}/{new_gtf_sorted}")
-                    else:
-                        print(f"Error: Failed to copy GTF file to {folder_insertion}/{new_gtf_sorted}")
-                except Exception as e:
-                    print(f"Error copying GTF file: {str(e)}")
+                logging.info("Exact path is not specified (Targeted option is off). Copying GTF file without modifications.")
+                copy_command = f"cp {gtf_file} {folder_insertion}/{new_gtf_sorted}"
+                if run_command(copy_command):
+                    logging.info(f"GTF file copied to: {folder_insertion}/{new_gtf_sorted}")
+                else:
+                    logging.info(f"Failed to copy GTF file to {folder_insertion}/{new_gtf_sorted}")
         else:
-            print(f"Error: GTF file not found at: {gtf_file}")
+            pass
     else:
         print("No GTF file specified. Skipping GTF processing.")
 
-    print("GTF processing complete")
+    logging.info("GTF processing complete")
+    print("Beginning genome index preparation...")
+    logging.info("Beginning genome index preparation")
     
     if marker_sources_path is not None:
         if exact_path is None:
-            #Copies the reference genome into a new FASTA file that the transgenes will also be added to
-            os.system(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}')
+            # Copies the reference genome into a new FASTA file that the transgenes will also be added to
+            logging.info(f"Copying reference genome to: {temp_folder}/{genome_with_markers}")
+            if not run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}'):
+                logging.info("Failed to copy reference genome. Exiting.")
+                sys.exit(1)
 
-        for file in marker_sources_path: 
-            print(f'COMMAND FOR MARKER SOURCES PATH: echo "$(cat {file})" >> {temp_folder}/{marker_list_file}') #DEBUG
-            os.system(f'echo "$(cat {file})" >> {temp_folder}/{marker_list_file}') 
+        for file in marker_sources_path:
+            if not check_file_exists(file):
+                logging.info(f"Marker source file not found: {file}. Skipping.")
+                continue
+            
+            logging.info(f'Adding marker from: {file}')
+            if not append_file_content(file, f'{temp_folder}/{marker_list_file}'):
+                logging.info(f"Failed to append content from {file} to {temp_folder}/{marker_list_file}")
 
-        #Adds the transgenes to the new "collated" FASTA file
-        print(f'ADDING TO COLLATED FILE: echo "$(cat {temp_folder}/{marker_list_file})" >> {temp_folder}/{genome_with_markers}') #DEBUG
-        os.system(f'echo "$(cat {temp_folder}/{marker_list_file})" >> {temp_folder}/{genome_with_markers}')
+        # Adds the transgenes to the new "collated" FASTA file
+        logging.info(f'Adding collated markers to: {temp_folder}/{genome_with_markers}')
+        if not append_file_content(f'{temp_folder}/{marker_list_file}', f'{temp_folder}/{genome_with_markers}'):
+            logging.info("Failed to add collated markers to genome file. Exiting.")
+            sys.exit(1)
 
-    #Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
-    os.system(f'bwa index -b {base_block} {temp_folder}/{genome_with_markers}')
-    os.system(f'cp {temp_folder}/{genome_with_markers} {folder_insertion}/{genome_with_markers}')
-    
+    # Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
+    logging.info(f"Building BWA index for: {temp_folder}/{genome_with_markers}")
+    if not run_command(f'bwa index -b {base_block} {temp_folder}/{genome_with_markers}'):
+        logging.info("Failed to build BWA index. Exiting.")
+        sys.exit(1)
+
+    logging.info(f"Copying augmented genome to: {folder_insertion}/{genome_with_markers}")
+    if not run_command(f'cp {temp_folder}/{genome_with_markers} {folder_insertion}/{genome_with_markers}'):
+        logging.info("Failed to copy augmented genome to insertion folder. Exiting.")
+        sys.exit(1)
+
     if args.keepgoing:
-        print("Finished beginning, continuing to align")
+        logging.info("Finished beginning, continuing to align")
         args.start = "align"
 
 if args.start == "align" or args.start == "all":
-    #Beginning of multithreaded part:
+    print("Starting alignment process")
+    logging.info("Starting alignment process")
 
-    #Aligns the new genome using BWA-MEM
-    os.system(f'bwa mem -M -t {threads} {temp_folder}/{genome_with_markers} {reads_1_path} {reads_2_path} > {temp_folder}/{aligned_with_markers}')
+    # Check if input files exist
+    if not check_file_exists(f"{temp_folder}/{genome_with_markers}"):
+        logging.info("Genome file not found. Exiting.")
+        sys.exit(1)
+    if not check_file_exists(reads_1_path) or not check_file_exists(reads_2_path):
+        logging.info("Read files not found. Exiting.")
+        sys.exit(1)
+
+    # Aligns the new genome using BWA-MEM
+    print("Aligning reads to genome using BWA-MEM")
+    logging.info(f"Aligning reads to genome using BWA-MEM with {threads} threads")
+    alignment_command = f'bwa mem -M -t {threads} {temp_folder}/{genome_with_markers} {reads_1_path} {reads_2_path} > {temp_folder}/{aligned_with_markers}'
+    if not run_command(alignment_command):
+        logging.info("Alignment failed. Exiting.")
+        sys.exit(1)
+
+    # Check if output file was created
+    if not check_file_exists(f"{temp_folder}/{aligned_with_markers}"):
+        logging.info("Alignment output file not found. Exiting.")
+        sys.exit(1)
+
+    logging.info("Alignment completed successfully")
+
     if args.keepgoing:
-        print("Finished align, continuing to markers")
+        logging.info("Finished align, continuing to markers")
         args.start = "markers"
     
 if args.start == "markers" or args.start == "all":
-    os.system(f'mkdir -p {folder_insertion}')
-    if marker_sources_path != []:
-        #Saves all names of transgenes/markers we want to find insertion sites of into a list for later usage and makes it into a string
+    print("Starting markers processing")
+    logging.info("Starting markers processing")
+
+    if not run_command(f'mkdir -p {folder_insertion}'):
+        logging.info(f"Failed to create directory: {folder_insertion}")
+        sys.exit(1)
+
+    if not marker_sources_path:
+        logging.info("No marker sources specified. Skipping marker processing.")
+    else:
+        # Check if marker list file exists
+        if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
+            logging.info(f"Marker list file not found: {temp_folder}/{marker_list_file}")
+            sys.exit(1)
+
+        # Read marker list
         with open(f'{temp_folder}/{marker_list_file}') as f:
             marker_list = [i[1:].strip() for i in f if i.startswith('>')]
         markers = "|".join(marker_list)
-    
-        #Uses the "markers" string as a regular expression to find reads in the newly-aligned SAM file that align to a transgene and have a mate on a human chromosome
-        #Exports these reads into a new SAM file, "diff_chr"
+        logging.info(f"Processed {len(marker_list)} markers")
+
+        # Add mitochondrial marker if specified
         if args.mitochondrial:
             markers += "|chrM"
+            logging.info("Added mitochondrial marker")
 
-            os.system(f"samtools view -h -@ {threads} {temp_folder}/{aligned_with_markers} |gawk '{{if ((($3 ~ /^({markers})/)&&($7 ~ /chr([0-9]+|[XY])/))||($1 ~ /^@/)) print $0}};' > {temp_folder}/{aligned_diff_chr}")
-        else:
-            os.system(f"samtools view -h -@ {threads} {temp_folder}/{aligned_with_markers} |gawk '{{if ((($3 ~ /^({markers})/)&&($7 ~ /chr([0-9]+|[XYM])/))||($1 ~ /^@/)) print $0}};' > {temp_folder}/{aligned_diff_chr}")
+        # Check if aligned SAM file exists
+        if not check_file_exists(f'{temp_folder}/{aligned_with_markers}'):
+            logging.info(f"Aligned SAM file not found: {temp_folder}/{aligned_with_markers}")
+            sys.exit(1)
 
-        #Sorts the previously-aligned SAM file to a BAM file and places it in the main output folder for both potential post-pipeline manual viewing and for later steps in the pipeline itself 
-        os.system(f"samtools sort -@ {threads} {temp_folder}/{aligned_with_markers} > {folder_insertion}/{aligned_diff_chr_bam}")
-        os.system(f"samtools index -@ {threads} {folder_insertion}/{aligned_diff_chr_bam}")
+        # Process alignments
+        samtools_view_cmd = f"samtools view -h -@ {threads} {temp_folder}/{aligned_with_markers}"
+        gawk_cmd = f"gawk '{{if ((($3 ~ /^({markers})/)&&($7 ~ /chr([0-9]+|[XY{'M' if not args.mitochondrial else ''}])/))||($1 ~ /^@/)) logging $0}}'"
+        full_cmd = f"{samtools_view_cmd} | {gawk_cmd} > {temp_folder}/{aligned_diff_chr}"
+        
+        logging.info("Processing alignments to find transgene insertions")
+        if not run_command(full_cmd):
+            logging.info("Failed to process alignments")
+            sys.exit(1)
 
-        #Creates a header from the BAM file
-        os.system(f'samtools view -@ {threads} -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{header}')
-    
+        # Sort and index BAM file
+        logging.info("Sorting and indexing BAM file")
+        if not run_command(f"samtools sort -@ {threads} {temp_folder}/{aligned_with_markers} > {folder_insertion}/{aligned_diff_chr_bam}"):
+            logging.info("Failed to sort BAM file")
+            sys.exit(1)
+        if not run_command(f"samtools index -@ {threads} {folder_insertion}/{aligned_diff_chr_bam}"):
+            logging.info("Failed to index BAM file")
+            sys.exit(1)
+
+        # Create header from BAM file
+        logging.info("Creating header from BAM file")
+        if not run_command(f'samtools view -@ {threads} -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{header}'):
+            logging.info("Failed to create header from BAM file")
+            sys.exit(1)
+
+    logging.info("Marker processing completed")
+
     if args.keepgoing:
+        logging.info("Finished markers, continuing to readout")
         print("Finished markers, continuing to readout")
         args.start = "readout"
         
-if args.start == "readout" or args.start == "all": #lines 244-249 have been unindented by one level to accomodate this new start setting.
-    with open(f'{temp_folder}/{marker_list_file}') as f: #also i added this
-        marker_list = [i[1:].strip() for i in f if i.startswith('>')] #and this
-    #Functions imported from seqver_functions, refer to comments there for details on their functioning.
-    #Takes "diff_chr", generates a .txt human-readable readout of the insertion sites, places it into the output folder.
+if args.start == "readout" or args.start == "all":
+    print("Starting readout processing")
+    logging.info("Starting readout processing")
+
+    # Check if marker list file exists
+    if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
+        logging.info(f"Marker list file not found: {temp_folder}/{marker_list_file}")
+        sys.exit(1)
+
+    # Read marker list
+    with open(f'{temp_folder}/{marker_list_file}') as f:
+        marker_list = [i[1:].strip() for i in f if i.startswith('>')]
+    logging.info(f"Processed {len(marker_list)} markers from marker list file")
+
+    # Check if aligned diff chr file exists
+    if not check_file_exists(f'{temp_folder}/{aligned_diff_chr}'):
+        logging.info(f"Aligned diff chr file not found: {temp_folder}/{aligned_diff_chr}")
+        sys.exit(1)
+
+    # Process data
+    logging.info("Grouping alignment data")
     data = group(f'{temp_folder}/{aligned_diff_chr}')
-    insertions = compress(data,granularity_threshold)
-    filteredInsertions = filterAndScore(temp_folder,folder_insertion,aligned_diff_chr_bam,insertions,args.spurious_filtering_threshold,args.stringency)
-    readout(folder_insertion,filteredInsertions[1],filteredInsertions[0],marker_list,min_matches)
-    
+    if data is None:
+        logging.info("Failed to group alignment data")
+        sys.exit(1)
+
+    logging.info("Compressing insertion data")
+    insertions = compress(data, granularity_threshold)
+    if insertions is None:
+        logging.info("Failed to compress insertion data")
+        sys.exit(1)
+
+    logging.info("Filtering and scoring insertions")
+    filteredInsertions = filterAndScore(temp_folder, folder_insertion, aligned_diff_chr_bam, insertions, args.spurious_filtering_threshold, args.stringency)
+    if filteredInsertions is None:
+        logging.info("Failed to filter and score insertions")
+        sys.exit(1)
+
+    logging.info("Generating readout")
+    success = readout(folder_insertion, filteredInsertions[1], filteredInsertions[0], marker_list, min_matches)
+    if not success:
+        logging.info("Failed to generate readout")
+        sys.exit(1)
+
+    logging.info("Readout processing completed")
+
     if args.keepgoing:
-        print("Finished markers, continuing to CNV")
+        logging.info("Finished readout, continuing to CNV")
         args.start = "cnv"
 
 if args.start == "cnv" or args.start == "all":
-    os.system(f'mkdir -p {folder_cnv}')
-    #CNVPytor Logic/Commands, these create a .pytor file for the BAM file and go through all the steps necessary to generate a final plot of the entire genome for ease of CNV analysis
-    #Refer to github.com/abyzovlab/CNVpytor/tree/master/cnvpytor for more information
+    print("Starting CNV analysis")
+    logging.info("Starting CNV analysis")
 
-    if exact_path is None: #if there weren't any changes to the default genome
-        os.system(f'cnvpytor -root {folder_cnv}/{pytor} -rd {folder_insertion}/{aligned_diff_chr_bam}')
-        os.system(f'cnvpytor -root {folder_cnv}/{pytor} -his {bin_size}')
-        os.system(f'cnvpytor -root {folder_cnv}/{pytor} -partition {bin_size}')
-        os.system(f'cnvpytor -root {folder_cnv}/{pytor} -call {bin_size} > {folder_cnv}/calls.{bin_size}.tsv')
-        os.system(f'cnvpytor -root {folder_cnv}/{pytor} -plot manhattan {bin_size} -o {folder_cnv}/{output_name}.png')
+    if not run_command(f'mkdir -p {folder_cnv}'):
+        logging.info(f"Failed to create directory: {folder_cnv}")
+        sys.exit(1)
+
+    # Check if BAM file exists
+    if not check_file_exists(f'{folder_insertion}/{aligned_diff_chr_bam}'):
+        logging.info(f"BAM file not found: {folder_insertion}/{aligned_diff_chr_bam}")
+        sys.exit(1)
+
+    cnvpytor_commands = []
+    if exact_path is None:
+        logging.info("Using default genome for CNV analysis")
+        cnvpytor_commands = [
+            f'cnvpytor -root {folder_cnv}/{pytor} -rd {folder_insertion}/{aligned_diff_chr_bam}',
+            f'cnvpytor -root {folder_cnv}/{pytor} -his {bin_size}',
+            f'cnvpytor -root {folder_cnv}/{pytor} -partition {bin_size}',
+            f'cnvpytor -root {folder_cnv}/{pytor} -call {bin_size} > {folder_cnv}/calls.{bin_size}.tsv',
+            f'cnvpytor -root {folder_cnv}/{pytor} -plot manhattan {bin_size} -o {folder_cnv}/{output_name}.png'
+        ]
     else:
-        genome_configurator(temp_folder,pytor_conf,pytor_gc,genome_with_markers,header)
-        os.system(f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -rd {folder_insertion}/{aligned_diff_chr_bam}')
-        os.system(f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -his {bin_size}')
-        os.system(f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -partition {bin_size}')
-        os.system(f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -call {bin_size} > {folder_cnv}/calls.{bin_size}.tsv')
-        os.system(f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -plot manhattan {bin_size} -o {folder_cnv}/{output_name}.png')
+        logging.info("Configuring genome for CNV analysis")
+        if not genome_configurator(temp_folder, pytor_conf, pytor_gc, genome_with_markers, header):
+            logging.info("Failed to configure genome for CNV analysis")
+            sys.exit(1)
+        
+        cnvpytor_commands = [
+            f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -rd {folder_insertion}/{aligned_diff_chr_bam}',
+            f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -his {bin_size}',
+            f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -partition {bin_size}',
+            f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -call {bin_size} > {folder_cnv}/calls.{bin_size}.tsv',
+            f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -plot manhattan {bin_size} -o {folder_cnv}/{output_name}.png'
+        ]
+
+    for i, cmd in enumerate(cnvpytor_commands, 1):
+        logging.info(f"Running CNVpytor step {i}/{len(cnvpytor_commands)}")
+        if not run_command(cmd):
+            logging.info(f"CNVpytor step {i} failed. Command: {cmd}")
+            sys.exit(1)
+
+    logging.info("CNV analysis completed")
 
     if args.keepgoing:
-        print("Finished CNVpytor, continuing to plots")
+        logging.info("Finished CNVpytor, continuing to plots")
         args.start = "plots"
 
 if args.start == "plots" or args.start == "all":
-    os.system(f'mkdir -p {folder_cnv}')
+    logging.info("Starting plots generation")
+
+    if not run_command(f'mkdir -p {folder_cnv}'):
+        logging.info(f"Failed to create directory: {folder_cnv}")
+        sys.exit(1)
+
     try:
+        logging.info("Generating region bed file")
         region_bed(temp_folder, header, commands, marker_list, bed_file)
     except NameError as e:
-        print(f"NameError occurred: {e}")
-        print("Attempting to regenerate necessary data...")
+        logging.info(f"NameError occurred: {e}")
+        logging.info("Attempting to regenerate necessary data...")
         
         # commands re-generation if not already defined
         if 'exact_path' in locals() and exact_path is not None:
             try:
+                logging.info("Regenerating commands")
                 commands = commandHandler(genome_source_path, exact_path, temp_folder, genome_with_markers, return_commands_only=True)
             except Exception as cmd_error:
-                print(f"Error in commandHandler: {cmd_error}")
+                logging.info(f"Error in commandHandler: {cmd_error}")
                 commands = []
         else:
-            print("exact_path is not defined or None. Setting commands to empty list.")
+            logging.info("exact_path is not defined or None. Setting commands to empty list.")
             commands = []
         
         # marker_list re-generation if not already defined
         try:
+            logging.info("Regenerating marker list")
             with open(f'{temp_folder}/{marker_list_file}') as f:
                 marker_list = [i[1:].strip() for i in f if i.startswith('>')]
             markers = "|".join(marker_list)
         except FileNotFoundError:
-            print(f"marker_list_file not found: {marker_list_file}")
+            logging.info(f"marker_list_file not found: {marker_list_file}")
             marker_list = []
             markers = ""
 
-        # bed_file re-generation if not already defined
+        # header re-generation if not already defined
         if 'header' not in locals() or header is None:
-            print("Warning: 'header' is not defined. Attempting to recreate it.")
+            logging.info("Warning: 'header' is not defined. Attempting to recreate it.")
             try:
-                # header retrieval from BAM file
-                os.system(f'samtools view -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/temp_header.sam')
+                logging.info("Retrieving header from BAM file")
+                if not run_command(f'samtools view -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/temp_header.sam'):
+                    raise Exception("Failed to retrieve header from BAM file")
                 with open(f'{temp_folder}/temp_header.sam', 'r') as header_file:
                     header = header_file.read()
-                print("Header successfully recreated.")
+                logging.info("Header successfully recreated.")
             except Exception as header_error:
-                print(f"Error recreating header: {header_error}")
-                print("Proceeding without header. This may cause issues in subsequent steps.")
+                logging.info(f"Error recreating header: {header_error}")
+                logging.info("Proceeding without header. This may cause issues in subsequent steps.")
                 header = ""
 
         # bed_file execution
         try:
+            logging.info("Executing region_bed function")
             if all(var is not None for var in [temp_folder, header, commands, marker_list, bed_file]):
                 region_bed(temp_folder, header, commands, marker_list, bed_file)
-                print(f"Bed file created successfully: {bed_file}")
+                logging.info(f"Bed file created successfully: {bed_file}")
             else:
                 missing_vars = [var for var in ['temp_folder', 'header', 'commands', 'marker_list', 'bed_file'] if locals().get(var) is None]
-                print(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
+                logging.info(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
         except Exception as region_bed_error:
-            print(f"Error in region_bed: {region_bed_error}")
-            print("Failed to create bed file. This may affect subsequent steps.")
+            logging.info(f"Error in region_bed: {region_bed_error}")
+            logging.info("Failed to create bed file. This may affect subsequent steps.")
 
-        # error handling for bed_file creation
-        if os.path.exists(bed_file):
-            print(f"Bed file exists at: {bed_file}")
-        else:
-            print(f"Warning: Bed file not found at: {bed_file}")
-            print("This may affect IGV screenshot generation.")
-
-    # If the bed file was created successfully, proceed with IGV screenshot generation
-    if os.path.exists(bed_file):
-        print(f"Bed file created successfully: {bed_file}")
-        # If the GTF file was specified, use the sorted GTF file for IGV screenshots
+    # Check if bed file was created
+    if check_file_exists(bed_file):
+        logging.info(f"Bed file exists at: {bed_file}")
     else:
-        print(f"Warning: Bed file not found: {bed_file}")
-        print("Proceeding without bed file. This may affect IGV screenshot generation.")
+        logging.info(f"Warning: Bed file not found at: {bed_file}")
+        logging.info("This may affect IGV screenshot generation.")
         
-    #Plotting Logic
+    # Plotting Logic
     if not args.manual_plots:
-        #If IGV plots are used (default option), creates plots of the transgenes through IGV: the .bed file here is used to direct IGV towards the relevant regions of the genome
+        logging.info("Generating IGV plots")
         if args.gtf is not None:
-            gtf = new_gtf_sorted #don't put {folder_insertion} at the front
-        igvScreenshot_new(temp_folder,folder_insertion,f'{folder_insertion}/{aligned_diff_chr_bam}',f'{folder_insertion}/{genome_with_markers}',bed_file, gtf_file=gtf)
+            gtf = new_gtf_sorted  # don't put {folder_insertion} at the front
+        else:
+            gtf = None
+        if not igvScreenshot_new(temp_folder, folder_insertion, f'{folder_insertion}/{aligned_diff_chr_bam}', f'{folder_insertion}/{genome_with_markers}', bed_file, gtf_file=gtf):
+            logging.info("Failed to generate IGV screenshots")
     else:
-        #If IGV plots are not used, creates matplotlib plots of the transgene copy numbers: the .bed file here is used to direct samtools depth towards the relevant regions to cut down time.
-        os.system(f'samtools depth -b {bed_file} {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{overall_coverage}')
-        #Creates the histograms (refer to seqver_plots.py for more information)
-        chrHistograms(f'{temp_folder}/{overall_coverage}',marker_list)
-        #Moves the plots and the coverage maps to the main and temp folders, respectively.
-        os.system(f'mv fig_* {folder_insertion}')
-        os.system(f'mv *.cov {temp_folder}')
+        logging.info("Generating manual plots")
+        if not run_command(f'samtools depth -b {bed_file} {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{overall_coverage}'):
+            logging.info("Failed to generate coverage file")
+            sys.exit(1)
         
+        if not chrHistograms(f'{temp_folder}/{overall_coverage}', marker_list):
+            logging.info("Failed to generate histograms")
+            sys.exit(1)
+        
+        if not run_command(f'mv fig_* {folder_insertion}'):
+            logging.info("Failed to move figure files")
+        if not run_command(f'mv *.cov {temp_folder}'):
+            logging.info("Failed to move coverage files")
+        
+    logging.info("Plot generation completed")
+
     if args.keepgoing:
         print("Finished plots, continuing to Kraken (if enabled)")
+        logging.info("Finished plots, continuing to Kraken (if enabled)")
         args.start = "kraken"
 
 if args.start == "kraken" or args.start == "all":
-    os.system(f'mkdir -p {folder_kraken}')
-    #KRAKEN2/BRACKEN system
+    logging.info("Starting Kraken/Bracken analysis")
+
+    if not run_command(f'mkdir -p {folder_kraken}'):
+        logging.info(f"Failed to create directory: {folder_kraken}")
+        sys.exit(1)
 
     if args.kraken:
-        #If KRAKEN is enabled (default: not enabled), runs the KRAKEN pipeline.
-        #Pulls out all unclassified reads (flag 0x13 means "paired (1), unmapped (4), mate unmapped (8)") and stores them in a SAM file
-        os.system(f'samtools view -f 13 -@ {threads} {folder_insertion}/{aligned_diff_chr_bam}> {temp_folder}/{unaligned}')
+        logging.info("Kraken analysis enabled")
 
-        #Separates the SAM file of all unaligned reads into its forward and backward reads
-        os.system(f'samtools fastq -@ {threads} {temp_folder}/{unaligned} -1 {temp_folder}/{unaligned_R1} -2 {temp_folder}/{unaligned_R2}')
+        # Check if input BAM file exists
+        if not check_file_exists(f'{folder_insertion}/{aligned_diff_chr_bam}'):
+            logging.info(f"Input BAM file not found: {folder_insertion}/{aligned_diff_chr_bam}")
+            sys.exit(1)
 
-        #Runs KRAKEN2, generating a report and placing it in the main output folder
-        os.system(f'kraken2 --threads {threads} --db {database} --report {folder_kraken}/classified_seqs_{output_name}.kreport --paired --classified-out {folder_kraken}/classified_seqs_{output_name}#.fq {temp_folder}/{unaligned_R1} {temp_folder}/{unaligned_R2} > {folder_kraken}/classified_{output_name}.kraken')
+        logging.info("Extracting unaligned reads")
+        if not run_command(f'samtools view -f 13 -@ {threads} {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{unaligned}'):
+            logging.info("Failed to extract unaligned reads")
+            sys.exit(1)
 
-        #Runs BRACKEN, generating a report in the main output folder.  
-        os.system(f'bracken -d {database} -i {folder_kraken}/classified_seqs_{output_name}.kreport -o {folder_kraken}/classified_seqs_{output_name}.bracken -r 150')
+        logging.info("Separating unaligned reads into forward and reverse")
+        if not run_command(f'samtools fastq -@ {threads} {temp_folder}/{unaligned} -1 {temp_folder}/{unaligned_R1} -2 {temp_folder}/{unaligned_R2}'):
+            logging.info("Failed to separate unaligned reads")
+            sys.exit(1)
+
+        logging.info("Running Kraken2")
+        kraken_cmd = f'kraken2 --threads {threads} --db {database} --report {folder_kraken}/classified_seqs_{output_name}.kreport --paired --classified-out {folder_kraken}/classified_seqs_{output_name}#.fq {temp_folder}/{unaligned_R1} {temp_folder}/{unaligned_R2} > {folder_kraken}/classified_{output_name}.kraken'
+        if not run_command(kraken_cmd):
+            logging.info("Kraken2 analysis failed")
+            sys.exit(1)
+
+        # Check if Kraken2 output file exists
+        if not check_file_exists(f'{folder_kraken}/classified_seqs_{output_name}.kreport'):
+            logging.info(f"Kraken2 output file not found: {folder_kraken}/classified_seqs_{output_name}.kreport")
+            sys.exit(1)
+
+        logging.info("Running Bracken")
+        bracken_cmd = f'bracken -d {database} -i {folder_kraken}/classified_seqs_{output_name}.kreport -o {folder_kraken}/classified_seqs_{output_name}.bracken -r 150'
+        if not run_command(bracken_cmd):
+            logging.info("Bracken analysis failed")
+            sys.exit(1)
+
+        # Check if Bracken output file exists
+        if not check_file_exists(f'{folder_kraken}/classified_seqs_{output_name}.bracken'):
+            logging.info(f"Bracken output file not found: {folder_kraken}/classified_seqs_{output_name}.bracken")
+            sys.exit(1)
+
+        logging.info("Kraken/Bracken analysis completed successfully")
+    else:
+        logging.info("Kraken analysis not enabled, skipping")
 
     if args.keepgoing:
-        print("Finished kraken, continuing to variant calling (if enabled)")
+        print("Finished Kraken, continuing to variant calling (if enabled)")
+        logging.info("Finished Kraken, continuing to variant calling (if enabled)")
         args.start = "variant"
 
 if args.start == "variant" or args.start == "all":
-    os.system(f'mkdir -p {folder_snp}')
+    logging.info("Starting variant calling")
+
+    if not run_command(f'mkdir -p {folder_snp}'):
+        logging.info(f"Failed to create directory: {folder_snp}")
+        sys.exit(1)
+
     if args.variant_calling is not None and args.variant_calling != []:
-        ##### Do the variant calling #####
-        
-        #Sets up the three variables needed for variant calling
-        # 1) The genome to be re-aligned to (GRCh38, given that CHM13 snpEff does not work)
-        # 2) The path to the config file
-        # 3) The path to a valid annotation DB
-        variant_genome_source_path = pathFinder(args.variant_calling[0]) #example: "seqverify_database/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz"
-        #variant_config_path = args.variant_calling[1] #not used. Maybe add as optional argument?
-        clinvardb_source_path = pathFinder(args.variant_calling[1]) #example: "seqverify_database/clinvar.vcf.gz" Note, vcf.gz.tbi file must also be present
-        
-        #check if BWA index file already exists, if not then create it
-        if os.path.isfile(variant_genome_source_path+".bwt") and os.path.isfile(variant_genome_source_path+".pac") and os.path.isfile(variant_genome_source_path+".sa") and os.path.isfile(variant_genome_source_path+".ann") and os.path.isfile(variant_genome_source_path+".amb"):
-            print("Detected that BWA indexing was already performed. Skipping BWA indexing.")
+        logging.info("Variant calling enabled")
+
+        # Set up variables for variant calling
+        variant_genome_source_path = pathFinder(args.variant_calling[0])
+        clinvardb_source_path = pathFinder(args.variant_calling[1])
+
+        # Check if input files exist
+        if not check_file_exists(variant_genome_source_path):
+            logging.info(f"Variant genome file not found: {variant_genome_source_path}")
+            sys.exit(1)
+        if not check_file_exists(clinvardb_source_path):
+            logging.info(f"ClinVar database file not found: {clinvardb_source_path}")
+            sys.exit(1)
+
+        # Check and create BWA index
+        bwa_index_files = [".bwt", ".pac", ".sa", ".ann", ".amb"]
+        if all(os.path.isfile(variant_genome_source_path + ext) for ext in bwa_index_files):
+            logging.info("BWA index files detected. Skipping BWA indexing.")
         else:
-            print("Existing BWA index not detected. Performing indexing.")
-            os.system(f"bwa index {variant_genome_source_path}")
-        if os.path.isfile(variant_genome_source_path+".fai"):
-            print("Detected that samtools faidx was already performed. Skipping samtools faidx.")
+            logging.info("Creating BWA index")
+            if not run_command(f"bwa index {variant_genome_source_path}"):
+                logging.info("BWA indexing failed")
+                sys.exit(1)
+
+        # Check and create samtools faidx
+        if os.path.isfile(variant_genome_source_path + ".fai"):
+            logging.info("Samtools faidx index detected. Skipping samtools faidx.")
         else:
-            print("Existing FASTA index not detected. Performing indexing.")
-            os.system(f"samtools faidx {variant_genome_source_path}")
-        
-        #realigning the reads to the new genome
+            logging.info("Creating samtools faidx index")
+            if not run_command(f"samtools faidx {variant_genome_source_path}"):
+                logging.info("Samtools faidx indexing failed")
+                sys.exit(1)
+
+        # Realign reads to the new genome
+        logging.info("Realigning reads to the variant genome")
         bwa_cmd = f"bwa mem -M -t {threads} {variant_genome_source_path} {reads_1_path} {reads_2_path} > {temp_folder}/{variant_genome_aligned}"
-        
-        exitcode = os.system(bwa_cmd)
-        if exitcode!=0: sys.exit("BWA failed")
-        
-        os.system(f"samtools sort -@ {threads} {temp_folder}/{variant_genome_aligned} > {temp_folder}/{variant_genome_aligned_bam}") 
-        os.system(f"samtools index -@ {threads} {temp_folder}/{variant_genome_aligned_bam}")
-        
-        #Generates the VCF through bcftools mpileup
-        #Calls variants using bcftools call. -mv option outputs only variant sites
-        #TODO: add multithreading (maybe split by chromosomes and then recombine)
-        os.system(f"bcftools mpileup -Ou -f {variant_genome_source_path} {temp_folder}/{variant_genome_aligned_bam} | bcftools call -mv -Ov -o {temp_folder}/{variant_vcf}")
-        
+        if not run_command(bwa_cmd):
+            logging.info("BWA alignment failed")
+            sys.exit(1)
+
+        # Sort and index the aligned BAM file
+        logging.info("Sorting and indexing the aligned BAM file")
+        if not run_command(f"samtools sort -@ {threads} {temp_folder}/{variant_genome_aligned} > {temp_folder}/{variant_genome_aligned_bam}"):
+            logging.info("Samtools sort failed")
+            sys.exit(1)
+        if not run_command(f"samtools index -@ {threads} {temp_folder}/{variant_genome_aligned_bam}"):
+            logging.info("Samtools index failed")
+            sys.exit(1)
+
+        # Generate VCF using bcftools
+        logging.info("Generating VCF using bcftools")
+        bcftools_cmd = f"bcftools mpileup -Ou -f {variant_genome_source_path} {temp_folder}/{variant_genome_aligned_bam} | bcftools call -mv -Ov -o {temp_folder}/{variant_vcf}"
+        if not run_command(bcftools_cmd):
+            logging.info("BCFtools variant calling failed")
+            sys.exit(1)
+
+        # Check if VCF file was created
+        if not check_file_exists(f"{temp_folder}/{variant_vcf}"):
+            logging.info(f"VCF file not found: {temp_folder}/{variant_vcf}")
+            sys.exit(1)
+
+        logging.info("Variant calling completed successfully")
+
         if args.keepgoing:
+            logging.info("Finished variant calling, continuing to SNP filtering")
             args.start = "snp_filtering"
+    else:
+        logging.info("Variant calling not enabled, skipping")
         
 if args.start == "snp_filtering" or args.start == "all":
-        variant_genome_source_path = pathFinder(args.variant_calling[0]) #example: "seqverify_database/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz"
-        clinvardb_source_path = pathFinder(args.variant_calling[1]) #example: "seqverify_database/clinvar.vcf.gz" Note, vcf.gz.tbi file must also be present
-        
-        #Runs snpEff, SnpSift to do a first pass of filtering the variants, saves everything in the main folder for post-pipeline analysis
-        os.system(f"snpEff -dataDir seqverify_defaults -v GRCh38.105 {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}")
-        os.system(f"SnpSift annotate -v {clinvardb_source_path} {temp_folder}/{variant_vcf_ann} > {folder_snp}/{variant_vcf_ann}")
-        
-        #Further filter the reads, saves everything to a readout in the main folder
-        if exact_path is None:
-            mutation_logger(folder_snp,variant_lof,variant_vcf_ann,args.min_quality,args.variant_intensity, args.variant_window_size)
+    logging.info("Starting SNP filtering")
+
+    if args.variant_calling is not None and args.variant_calling != []:
+        variant_genome_source_path = pathFinder(args.variant_calling[0])
+        clinvardb_source_path = pathFinder(args.variant_calling[1])
+
+        # Check if input files exist
+        if not check_file_exists(f"{temp_folder}/{variant_vcf}"):
+            logging.info(f"Input VCF file not found: {temp_folder}/{variant_vcf}")
+            sys.exit(1)
+        if not check_file_exists(clinvardb_source_path):
+            logging.info(f"ClinVar database file not found: {clinvardb_source_path}")
+            sys.exit(1)
+
+        # Run snpEff
+        logging.info("Running snpEff for variant annotation")
+        snpeff_cmd = f"snpEff -dataDir seqverify_defaults -v GRCh38.105 {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}"
+        if not run_command(snpeff_cmd):
+            logging.info("snpEff annotation failed")
+            sys.exit(1)
+
+        # Check if snpEff output file was created
+        if not check_file_exists(f"{temp_folder}/{variant_vcf_ann}"):
+            logging.info(f"snpEff output file not found: {temp_folder}/{variant_vcf_ann}")
+            sys.exit(1)
+
+        # Run SnpSift
+        logging.info("Running SnpSift for ClinVar annotation")
+        snpsift_cmd = f"SnpSift annotate -v {clinvardb_source_path} {temp_folder}/{variant_vcf_ann} > {folder_snp}/{variant_vcf_ann}"
+        if not run_command(snpsift_cmd):
+            logging.info("SnpSift annotation failed")
+            sys.exit(1)
+
+        # Check if SnpSift output file was created
+        if not check_file_exists(f"{folder_snp}/{variant_vcf_ann}"):
+            logging.info(f"SnpSift output file not found: {folder_snp}/{variant_vcf_ann}")
+            sys.exit(1)
+
+        # Run mutation logger
+        logging.info("Running mutation logger for final filtering")
+        try:
+            if exact_path is None:
+                mutation_logger(folder_snp, variant_lof, variant_vcf_ann, args.min_quality, args.variant_intensity, args.variant_window_size)
+            else:
+                mutation_logger(folder_snp, variant_lof, variant_vcf_ann, args.min_quality, args.variant_intensity, args.variant_window_size, exact_path)
+        except Exception as e:
+            logging.info(f"Mutation logger failed: {e}")
+            sys.exit(1)
+
+        # Check if mutation logger output file was created
+        if not check_file_exists(f"{folder_snp}/{variant_lof}"):
+            logging.info(f"Mutation logger output file not found: {folder_snp}/{variant_lof}")
+            sys.exit(1)
+
+        logging.info("SNP filtering completed successfully")
+    else:
+        logging.info("Variant calling was not enabled, skipping SNP filtering")
+
+# Temporary folder cleanup
+if args.keep_temp:
+    logging.info(f"Keeping temporary folder: {temp_folder}")
+else:
+    logging.info(f"Attempting to remove temporary folder: {temp_folder}")
+    try:
+        if os.path.exists(temp_folder):
+            shutil.rmtree(temp_folder)
+            logging.info(f"Successfully removed temporary folder: {temp_folder}")
         else:
-            mutation_logger(folder_snp,variant_lof,variant_vcf_ann,args.min_quality,args.variant_intensity, args.variant_window_size, exact_path)
-    #If deletion of files is enabled (which is it by default), deletes the temp folder.
-    #This is recommended, especially since temp files contain SAM files that can get to 100+ GB depending on the size of the original inputs.
-if not args.keep_temp:
-    os.system(f'rm -r {temp_folder}')
+            logging.info(f"Temporary folder not found: {temp_folder}")
+    except Exception as e:
+        print(f"Warning: Failed to remove temporary folder: {e}")
+        logging.info(f"You may need to manually remove the temporary folder: {temp_folder}")
+
+logging.info("SeqVerify pipeline completed")
