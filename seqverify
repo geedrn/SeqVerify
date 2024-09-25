@@ -60,9 +60,10 @@ parser.add_argument('--config',type=str,required=False,default=None)
 
 args = parser.parse_args()
 
-def setup_logging():
+# File name with output
+def setup_logging(output=args.output):
     logging.basicConfig(
-        filename='seqverify.log',
+        filename=f"{output}_seqverify.log",
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
@@ -281,6 +282,7 @@ if args.start == "beginning" or args.start == "all":
     
     print("Merging transgenes into genome...")
     logging.info("Automatically preparing collated genome")
+    
     if args.gtf is not None:
         logging.info(f"GTF file specified: {gtf_file}")
         if check_file_exists(gtf_file):
@@ -344,6 +346,12 @@ if args.start == "beginning" or args.start == "all":
         logging.info(f'Adding collated markers to: {temp_folder}/{genome_with_markers}')
         if not append_file_content(f'{temp_folder}/{marker_list_file}', f'{temp_folder}/{genome_with_markers}'):
             logging.info("Failed to add collated markers to genome file. Exiting.")
+            sys.exit(1)
+            
+    if marker_sources_path is None:
+        logging.info("No marker sources specified. Skipping marker addition to genome.")
+        if not run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}'):
+            logging.error("Failed to copy reference genome. Exiting.")
             sys.exit(1)
 
     # Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
