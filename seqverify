@@ -554,7 +554,7 @@ if args.start == "cnv" or args.start == "all":
         if not run_command(cmd):
             logging.error(f"CNVpytor step {i} failed. Command: {cmd}")
             sys.exit(1)
-
+    print("CNV analysis completed")
     logging.info("CNV analysis completed")
 
     if args.keepgoing:
@@ -562,6 +562,7 @@ if args.start == "cnv" or args.start == "all":
         args.start = "plots"
 
 if args.start == "plots" or args.start == "all":
+    print("Starting plots generation")
     logging.info("Starting plots generation")
 
     if not run_command(f'mkdir -p {folder_cnv}'):
@@ -574,57 +575,59 @@ if args.start == "plots" or args.start == "all":
             logging.info("Regenerating commands in commandHandler")
             commands = commandHandler(genome_source_path, exact_path, temp_folder, genome_with_markers, return_commands_only=True)
         except Exception as cmd_error:
-            logging.info(f"Error in commandHandler: {cmd_error}")
+            logging.error(f"Error in commandHandler: {cmd_error}")
             commands = []
-        else:
-            logging.info("exact_path is not defined or None. Setting commands to empty list.")
-            commands = []
+    else:
+        logging.info("exact_path is not defined or None. Setting commands to empty list.")
+        commands = []
         
     # marker_list re-generation if not already defined
+    try:
+        logging.info("Regenerating marker list")
+        with open(f'{temp_folder}/{marker_list_file}') as f:
+            marker_list = [i[1:].strip() for i in f if i.startswith('>')]
+        markers = "|".join(marker_list)
+    except FileNotFoundError:
+        logging.warning(f"marker_list_file not found: {marker_list_file}")
+        marker_list = []
+        markers = ""
+
+    # header re-generation if not already defined
+    if 'header' not in locals() or header is None:
+        logging.warning("Warning: 'header' is not defined. Attempting to recreate it.")
         try:
-            logging.info("Regenerating marker list")
-            with open(f'{temp_folder}/{marker_list_file}') as f:
-                marker_list = [i[1:].strip() for i in f if i.startswith('>')]
-            markers = "|".join(marker_list)
-        except FileNotFoundError:
-            logging.info(f"marker_list_file not found: {marker_list_file}")
-            marker_list = []
-            markers = ""
-
-        # header re-generation if not already defined
-        if 'header' not in locals() or header is None:
-            logging.info("Warning: 'header' is not defined. Attempting to recreate it.")
-            try:
-                logging.info("Retrieving header from BAM file")
-                if not run_command(f'samtools view -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/temp_header.sam'):
-                    raise Exception("Failed to retrieve header from BAM file")
-                with open(f'{temp_folder}/temp_header.sam', 'r') as header_file:
-                    header = header_file.read()
-                logging.info("Header successfully recreated.")
-            except Exception as header_error:
-                logging.info(f"Error recreating header: {header_error}")
-                logging.info("Proceeding without header. This may cause issues in subsequent steps.")
-                header = ""
-
-            # bed_file execution
-            try:
-                logging.info("Executing region_bed function")
-                if all(var is not None for var in [temp_folder, header, commands, marker_list, bed_file]):
-                    region_bed(temp_folder, header, commands, marker_list, bed_file)
-                    logging.info(f"Bed file created successfully: {bed_file}")
-                else:
-                    missing_vars = [var for var in ['temp_folder', 'header', 'commands', 'marker_list', 'bed_file'] if locals().get(var) is None]
-                    logging.info(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
-            except Exception as region_bed_error:
-                logging.info(f"Error in region_bed: {region_bed_error}")
-                logging.info("Failed to create bed file. This may affect subsequent steps.")
-
-        # Check if bed file was created
-        if check_file_exists(bed_file):
-            logging.info(f"Bed file exists at: {bed_file}")
+            logging.info("Retrieving header from BAM file")
+            if not run_command(f'samtools view -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/temp_header.sam'):
+                raise Exception("Failed to retrieve header from BAM file")
+            with open(f'{temp_folder}/temp_header.sam', 'r') as header_file:
+                header = header_file.read()
+            logging.info("Header successfully recreated.")
+        except Exception as header_error:
+            logging.error(f"Error recreating header: {header_error}")
+            logging.warning("Proceeding without header. This may cause issues in subsequent steps.")
+            header = ""
+            
+    # bed_file execution
+    try:
+        print("Executing region_bed function")
+        logging.info("Executing region_bed function")
+        if all(var is not None for var in [temp_folder, header, commands, marker_list, bed_file]):
+            region_bed(temp_folder, header, commands, marker_list, bed_file)
+            logging.info(f"Bed file created successfully: {bed_file}")
         else:
-            logging.info(f"Warning: Bed file not found at: {bed_file}")
-            logging.info("This may affect IGV screenshot generation.")
+            missing_vars = [var for var in ['temp_folder', 'header', 'commands', 'marker_list', 'bed_file'] if locals().get(var) is None]
+            logging.error(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
+    except Exception as region_bed_error:
+        print("Error in creating bed file")
+        logging.error(f"Error in region_bed: {region_bed_error}")
+        logging.warning("Failed to create bed file. This may affect subsequent steps.")
+
+    # Check if bed file was created
+    if check_file_exists(f"{temp_folder}/{bed_file}"):
+        logging.info(f"Bed file exists at: {temp_folder}/{bed_file}")
+    else:
+        logging.warning(f"Warning: Bed file not found at: {temp_folder}/{bed_file}")
+        logging.warning("This may affect IGV screenshot generation.")
         
     # Plotting Logic
     if not args.manual_plots:
