@@ -343,28 +343,47 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
         print(f"Error: Coverage file not found. This might indicate an issue with samtools depth command.")
         return readout_dict, readout_dict
 
-def readout(folder, insertion_dict, original_dict, chr_filter, min_matches=1):
+def readout(folder, insertion_dict, chr_filter, min_matches=1):
+    # original_dict parameter removed as it's not used in the current implementation
     print("reached printing")
-    with open(f"{folder}/seqverify_readout.txt", "w") as file:
-        file.write("chromosome,position,gene,nonchimeric_count,chimeric_count,confidence\n")
-        for read_chromosome, alignments in insertion_dict.items():
-            if alignments is not None and alignments != {}:
-                for align_chr, sites in alignments.items():
-                    if sites != {}:
-                        if align_chr in chr_filter:
-                            continue
-                        else:
-                            for site, repetitions in sites.items():
-                                if repetitions is not None and (repetitions[0] + repetitions[1]) >= min_matches:
-                                    nonchimeric_reads, chimeric_reads, score = repetitions[0], repetitions[1], repetitions[2]
-                                    if str(site)[0] == '-':
-                                        location = str(site)[1:]
-                                    else:
-                                        location = str(site)
-                                    file.write(f"{align_chr},{location},{read_chromosome},{nonchimeric_reads},{chimeric_reads},{score}\n")
+    logging.info("Starting readout generation")
+    
+    try:
+        with open(f"{folder}/seqverify_readout.txt", "w") as file:
+            file.write("chromosome,position,gene,nonchimeric_count,chimeric_count,confidence\n")
+            for read_chromosome, alignments in insertion_dict.items():
+                logging.debug(f"Processing read_chromosome: {read_chromosome}")
+                if alignments is not None and alignments != {}:
+                    for align_chr, sites in alignments.items():
+                        logging.debug(f"  Aligned chromosome: {align_chr}")
+                        if sites != {}:
+                            if align_chr in chr_filter:
+                                logging.debug(f"    Skipping {align_chr} (in chr_filter)")
+                                continue
+                            else:
+                                for site, repetitions in sites.items():
+                                    if repetitions is not None and (repetitions[0] + repetitions[1]) >= min_matches:
+                                        nonchimeric_reads, chimeric_reads, score = repetitions[0], repetitions[1], repetitions[2]
+                                        if str(site)[0] == '-':
+                                            location = str(site)[1:]
+                                        else:
+                                            location = str(site)
+                                        line = f"{align_chr},{location},{read_chromosome},{nonchimeric_reads},{chimeric_reads},{score}\n"
+                                        file.write(line)
+                                        logging.debug(f"    Writing: {line.strip()}")
 
-    run_command(f'''awk 'NR<2 {{print $0;next}} {{print $0| "sort -t ',' -k3,3 -k1,1 -k2,2n "}}' {folder}/seqverify_readout.txt > {folder}/seqverify_readout.sorted.txt''', shell=True)
+        logging.info("Finished writing readout file")
+        
+        sort_cmd = f'''awk 'NR<2 {{print $0;next}} {{print $0| "sort -t ',' -k3,3 -k1,1 -k2,2n "}}' {folder}/seqverify_readout.txt > {folder}/seqverify_readout.sorted.txt'''
+        logging.info(f"Executing sort command: {sort_cmd}")
+        run_command(sort_cmd, shell=True)
+        logging.info("Finished sorting readout file")
 
+        return True
+    except Exception as e:
+        logging.error(f"Error in readout function: {str(e)}")
+        return False
+    
 def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
     for vcf in [vcf_1, vcf_2]:
         run_command(f"bgzip -f {vcf}", shell=True)

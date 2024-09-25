@@ -60,17 +60,6 @@ parser.add_argument('--config',type=str,required=False,default=None)
 
 args = parser.parse_args()
 
-# File name with output
-def setup_logging(output=args.output):
-    logging.basicConfig(
-        filename=f"{output}_seqverify.log",
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-
-setup_logging()
-logging.info("SeqVerify execution starts...")
-
 if args.config is not None:
     config = configparser.ConfigParser(allow_no_value=True)
     config.read(args.config)
@@ -100,6 +89,66 @@ if args.config is not None:
     args.variant_intensity = config["VARIANT"]["variant_intensity"]
     args.variant_window_size = int(config["VARIANT"]["variant_window_size"])
     args.min_quality = int(config["OTHER"]["min_quality"])
+output_name = args.output
+
+#Stores Variable/Folder Names:
+folder = f"{output_name}_seqverify"
+temp_folder =f"{output_name}_seqverify_temp"
+marker_list_file = f"seqverify_{output_name}_transgene_list.fa"
+genome_with_markers = f"seqverify_{output_name}_genome_with_markers.fa"
+aligned_with_markers = f"seqverify_{output_name}_markers.sam"
+aligned_diff_chr = f"seqverify_{output_name}_markers_diff_chr.sam"
+aligned_diff_chr_bam = f"seqverify_{output_name}_markers_diff_chr.bam"
+header = f"seqverify_{output_name}_markers_header.sam"
+overall_coverage = f"seqverify_{output_name}_markers_coverage.cov"
+pytor = f"{output_name}.pytor"
+pytor_gc = f"{output_name}_gc.pytor"
+pytor_conf = f"{output_name}_genome_conf.py"
+unaligned = f"seqverify_{output_name}_unaligned.sam"
+unaligned_R1 = f"seqverify_{output_name}_unaligned_R1.fastq"
+unaligned_R2 = f"seqverify_{output_name}_unaligned_R2.fastq"
+variant_genome_aligned = f"seqverify_{output_name}_variant.sam"
+variant_genome_aligned_bam = f"seqverify_{output_name}_variant.bam"
+variant_vcf = f"seqverify_{output_name}.vcf"
+variant_vcf_ann = f"seqverify_{output_name}.ann.vcf"
+variant_lof = f"seqverify_{output_name}_variants.tsv"
+bed_file = f"{output_name}.bed"
+vcf_similarity = f"seqverify_{output_name}_bcfstats.txt"
+vcf_isec = f"seqverify_{output_name}_unique.vcf"
+new_gtf_unsorted = f"seqverify_{output_name}_unsorted.gtf"
+new_gtf_sorted = f"seqverify_{output_name}.gtf"
+
+#Output Subdirectories:
+folder_insertion = f"{folder}/insertion"
+folder_cnv = f"{folder}/copy_number"
+folder_kraken = f"{folder}/kraken"
+folder_snp =f"{folder}/variant_calling"
+
+if args.similarity is not None: #similarity also requires --output to be set, takes two arguments: first the original cell line, then the modified cell line, then --min_quality can be set to change the minimum quality (default: 100).
+    compare(args.similarity[0],args.similarity[1],args.min_quality,temp_folder,folder,vcf_similarity, vcf_isec)
+    sys.exit(0)
+
+#The pathFinder function detects whether arguments are paths or names and acts accordingly such that it can handle both cases for ease of use.
+reads_1_path = pathFinder(args.reads_1)
+reads_2_path = pathFinder(args.reads_2)
+genome_source_path = pathFinder(args.genome)
+
+marker_sources_path = None
+exact_path = None
+database = None
+gtf_file = None
+gtf = None
+    
+# File name with output
+def setup_logging(output=args.output):
+    logging.basicConfig(
+        filename=f"{output}_seqverify.log",
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+setup_logging()
+logging.info("SeqVerify execution starts...")    
 
 if args.download_defaults: #If --download_defaults is set, downloads the three databases and quits the program
     #Note:  These FTP links are likely to change over time and break the command. 
@@ -176,56 +225,6 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         sys.exit(1)
     
     sys.exit(1)
-
-output_name = args.output
-
-#Stores Variable/Folder Names:
-folder = f"{output_name}_seqverify"
-temp_folder =f"{output_name}_seqverify_temp"
-marker_list_file = f"seqverify_{output_name}_transgene_list.fa"
-genome_with_markers = f"seqverify_{output_name}_genome_with_markers.fa"
-aligned_with_markers = f"seqverify_{output_name}_markers.sam"
-aligned_diff_chr = f"seqverify_{output_name}_markers_diff_chr.sam"
-aligned_diff_chr_bam = f"seqverify_{output_name}_markers_diff_chr.bam"
-header = f"seqverify_{output_name}_markers_header.sam"
-overall_coverage = f"seqverify_{output_name}_markers_coverage.cov"
-pytor = f"{output_name}.pytor"
-pytor_gc = f"{output_name}_gc.pytor"
-pytor_conf = f"{output_name}_genome_conf.py"
-unaligned = f"seqverify_{output_name}_unaligned.sam"
-unaligned_R1 = f"seqverify_{output_name}_unaligned_R1.fastq"
-unaligned_R2 = f"seqverify_{output_name}_unaligned_R2.fastq"
-variant_genome_aligned = f"seqverify_{output_name}_variant.sam"
-variant_genome_aligned_bam = f"seqverify_{output_name}_variant.bam"
-variant_vcf = f"seqverify_{output_name}.vcf"
-variant_vcf_ann = f"seqverify_{output_name}.ann.vcf"
-variant_lof = f"seqverify_{output_name}_variants.tsv"
-bed_file = f"{output_name}.bed"
-vcf_similarity = f"seqverify_{output_name}_bcfstats.txt"
-vcf_isec = f"seqverify_{output_name}_unique.vcf"
-new_gtf_unsorted = f"seqverify_{output_name}_unsorted.gtf"
-new_gtf_sorted = f"seqverify_{output_name}.gtf"
-
-#Output Subdirectories:
-folder_insertion = f"{folder}/insertion"
-folder_cnv = f"{folder}/copy_number"
-folder_kraken = f"{folder}/kraken"
-folder_snp =f"{folder}/variant_calling"
-
-if args.similarity is not None: #similarity also requires --output to be set, takes two arguments: first the original cell line, then the modified cell line, then --min_quality can be set to change the minimum quality (default: 100).
-    compare(args.similarity[0],args.similarity[1],args.min_quality,temp_folder,folder,vcf_similarity, vcf_isec)
-    sys.exit(0)
-
-#The pathFinder function detects whether arguments are paths or names and acts accordingly such that it can handle both cases for ease of use.
-reads_1_path = pathFinder(args.reads_1)
-reads_2_path = pathFinder(args.reads_2)
-genome_source_path = pathFinder(args.genome)
-
-marker_sources_path = None
-exact_path = None
-database = None
-gtf_file = None
-gtf = None
 
 granularity_threshold = args.granularity
 
@@ -325,6 +324,11 @@ if args.start == "beginning" or args.start == "all":
     print("Beginning genome index preparation...")
     logging.info("Beginning genome index preparation")
     
+    logging.info(f"Copying reference genome to: {temp_folder}/{genome_with_markers}")
+    if not run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}'):
+        logging.error("Failed to copy reference genome. Exiting.")
+        sys.exit(1)
+    
     if marker_sources_path:
         # Create an empty marker list file
         with open(f'{temp_folder}/{marker_list_file}', 'w') as f:
@@ -338,30 +342,29 @@ if args.start == "beginning" or args.start == "all":
             
             logging.info(f'Adding marker from: {file}')
             if not append_file_content(file, f'{temp_folder}/{marker_list_file}'):
-                logging.info(f"Failed to append content from {file} to {temp_folder}/{marker_list_file}")
+                logging.caution(f"Failed to append content from {file} to {temp_folder}/{marker_list_file}")
+                continue
 
-        # Adds the transgenes to the new "collated" FASTA file
-        logging.info(f'Adding collated markers to: {temp_folder}/{genome_with_markers}')
-        if not append_file_content(f'{temp_folder}/{marker_list_file}', f'{temp_folder}/{genome_with_markers}'):
-            logging.info("Failed to add collated markers to genome file. Exiting.")
-            sys.exit(1)
+        # Check if marker list file is not empty
+        if os.path.getsize(f'{temp_folder}/{marker_list_file}') > 0:
+            # Append the markers to the genome file
+            # logging.info(f'Adding collated markers to: {temp_folder}/{genome_with_markers}')
+            if not append_file_content(f'{temp_folder}/{marker_list_file}', f'{temp_folder}/{genome_with_markers}'):
+                logging.error("Failed to add collated markers to genome file. Exiting.")
+                sys.exit(1)
+                
+        else:
+            logging.warning("Marker list file is empty. No markers added to the genome.")
+            
     else:
-        # If no marker sources are specified, just copy the reference genome
-        logging.info("No marker sources specified. Copying reference genome without modifications.")
-        if not run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}'):
-            logging.error("Failed to copy reference genome. Exiting.")
-            sys.exit(1)
-        
-        # Create an empty marker list file
-        with open(f'{temp_folder}/{marker_list_file}', 'w') as f:
-            pass
-        logging.info(f"Created empty marker list file: {marker_list_file}")
-
-    # Check the final genome file
+        logging.info("No marker sources specified. Using reference genome without modifications.")
+    
+    # Verify the final genome file
     if check_file_exists(f'{temp_folder}/{genome_with_markers}'):
         logging.info(f"Final genome file size: {os.path.getsize(f'{temp_folder}/{genome_with_markers}')} bytes")
     else:
         logging.error(f"Final genome file not found: {temp_folder}/{genome_with_markers}")
+        sys.exit(1)
 
     # Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
     logging.info(f"Building BWA index for: {temp_folder}/{genome_with_markers}")
@@ -501,65 +504,71 @@ if args.start == "markers" or args.start == "all":
 if args.start == "readout" or args.start == "all":
     print("Starting readout processing")
     logging.info("Starting readout processing")
-
-    # Check if marker list file exists
-    if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
-        logging.error(f"Marker list file not found: {temp_folder}/{marker_list_file}")
-        sys.exit(1)
-
-    # Read marker list
-    with open(f'{temp_folder}/{marker_list_file}') as f:
-        marker_list = [i[1:].strip() for i in f if i.startswith('>')]
-    logging.info(f"Processed {len(marker_list)} markers from marker list file")
-    logging.info(f"Markers: {marker_list}")
-
-    # Check if aligned diff chr file exists
-    if not check_file_exists(f'{temp_folder}/{aligned_diff_chr}'):
-        logging.error(f"Aligned diff chr file not found: {aligned_diff_chr}")
-        sys.exit(1)
-
-    # Check file size
-    file_size = os.path.getsize(f'{temp_folder}/{aligned_diff_chr}')
-    logging.info(f"Aligned diff chr file size: {file_size} bytes")
-
-    if file_size == 0:
-        logging.warning(f"Aligned diff chr file is empty: f'{temp_folder}/{aligned_diff_chr}'")
-
-    # Process data
-    logging.info(f"Grouping alignment data from file: f'{temp_folder}/{aligned_diff_chr}'")
-    data = group(f'{temp_folder}/{aligned_diff_chr}')
     
-    if data is None:
-        logging.warning("No data found in aligned diff chr file. This might indicate an issue with the alignment process or file content.")
-        with open(f'{temp_folder}/{aligned_diff_chr}', 'r') as f:
-            first_lines = f.readlines(10) 
-        logging.warning(f"First few lines of the aligned diff chr file:\n{''.join(first_lines)}")
-        
+    # Check if either untargeted or targeted is specified
+    if not (args.untargeted or args.targeted):
+        logging.caution("Neither untargeted nor targeted markers specified. Skipping readout processing.")
+        print("Neither untargeted nor targeted markers specified. Skipping readout processing.")
     else:
-        logging.info(f"Successfully grouped alignment data. Number of reference chromosomes: {len(data)}")
-        for ref_chrom, alignments in data.items():
-            logging.info(f"Reference chromosome {ref_chrom} has alignments to {len(alignments)} chromosomes")
-
-        insertions = compress(data, granularity_threshold)
-        if insertions is None:
-            logging.info("No insertions found in data")
-
-        logging.info("Filtering and scoring insertions")
-        filteredInsertions = filterAndScore(temp_folder, folder_insertion, aligned_diff_chr_bam, insertions, args.spurious_filtering_threshold, args.stringency)
-        if filteredInsertions is None:
-            logging.info("No insertions passed filtering and scoring")
-
-        logging.info("Generating readout")
-        success = readout(folder_insertion, filteredInsertions[1], filteredInsertions[0], marker_list, min_matches)
-        if not success:
-            logging.error("Failed to generate readout")
+        # Check if marker list file exists
+        if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
+            logging.error(f"Marker list file not found: {temp_folder}/{marker_list_file}")
             sys.exit(1)
 
-    logging.info("Readout processing completed")
+        # Read marker list
+        with open(f'{temp_folder}/{marker_list_file}') as f:
+            marker_list = [i[1:].strip() for i in f if i.startswith('>')]
+        logging.info(f"Processed {len(marker_list)} markers from marker list file")
+        logging.info(f"Markers: {marker_list}")
 
-    if args.keepgoing:
-        logging.info("Finished readout, continuing to CNV")
-        args.start = "cnv"
+        # Check if aligned diff chr file exists
+        if not check_file_exists(f'{temp_folder}/{aligned_diff_chr}'):
+            logging.error(f"Aligned diff chr file not found: {aligned_diff_chr}")
+            sys.exit(1)
+
+        # Check file size
+        file_size = os.path.getsize(f'{temp_folder}/{aligned_diff_chr}')
+        logging.info(f"Aligned diff chr file size: {file_size} bytes")
+
+        if file_size == 0:
+            logging.warning(f"Aligned diff chr file is empty: f'{temp_folder}/{aligned_diff_chr}'")
+
+        # Process data
+        logging.info(f"Grouping alignment data from file: f'{temp_folder}/{aligned_diff_chr}'")
+        data = group(f'{temp_folder}/{aligned_diff_chr}')
+        
+        if data is None:
+            logging.warning("No data found in aligned diff chr file. This might indicate an issue with the alignment process or file content.")
+            with open(f'{temp_folder}/{aligned_diff_chr}', 'r') as f:
+                first_lines = f.readlines(10) 
+            logging.warning(f"First few lines of the aligned diff chr file:\n{''.join(first_lines)}")
+            
+        else:
+            logging.info(f"Successfully grouped alignment data. Number of reference chromosomes: {len(data)}")
+            for ref_chrom, alignments in data.items():
+                logging.info(f"Reference chromosome {ref_chrom} has alignments to {len(alignments)} chromosomes")
+
+            insertions = compress(data, granularity_threshold)
+            if insertions is None:
+                logging.info("No insertions found in data")
+
+            logging.info("Filtering and scoring insertions")
+            filteredInsertions = filterAndScore(temp_folder, folder_insertion, aligned_diff_chr_bam, insertions, args.spurious_filtering_threshold, args.stringency)
+            if filteredInsertions is None:
+                logging.info("No insertions passed filtering and scoring")
+
+            logging.info("Generating readout")
+            # Note: filteredInsertions[0] (original_dict) is not used in the current implementation of readout function
+            success = readout(folder_insertion, filteredInsertions[1], marker_list, min_matches)
+            if not success:
+                logging.error("Failed to generate readout")
+                print("Error: Failed to generate readout. Check the log for details.")
+                sys.exit(1)
+            logging.info("Readout processing completed")
+
+        if args.keepgoing:
+            logging.info("Finished readout, continuing to CNV")
+            args.start = "cnv"
 
 if args.start == "cnv" or args.start == "all":
     print("Starting CNV analysis")
