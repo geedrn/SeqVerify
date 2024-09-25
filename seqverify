@@ -567,27 +567,20 @@ if args.start == "plots" or args.start == "all":
     if not run_command(f'mkdir -p {folder_cnv}'):
         logging.error(f"Failed to create directory: {folder_cnv}")
         sys.exit(1)
-
-    try:
-        logging.info("Generating region bed file")
-        region_bed(temp_folder, header, commands, marker_list, bed_file)
-    except NameError as e:
-        logging.info(f"NameError occurred: {e}")
-        logging.info("Attempting to regenerate necessary data...")
         
-        # commands re-generation if not already defined
-        if 'exact_path' in locals() and exact_path is not None:
-            try:
-                logging.info("Regenerating commands")
-                commands = commandHandler(genome_source_path, exact_path, temp_folder, genome_with_markers, return_commands_only=True)
-            except Exception as cmd_error:
-                logging.info(f"Error in commandHandler: {cmd_error}")
-                commands = []
+    # commands re-generation if not already defined
+    if 'exact_path' in locals() and exact_path is not None:
+        try:
+            logging.info("Regenerating commands in commandHandler")
+            commands = commandHandler(genome_source_path, exact_path, temp_folder, genome_with_markers, return_commands_only=True)
+        except Exception as cmd_error:
+            logging.info(f"Error in commandHandler: {cmd_error}")
+            commands = []
         else:
             logging.info("exact_path is not defined or None. Setting commands to empty list.")
             commands = []
         
-        # marker_list re-generation if not already defined
+    # marker_list re-generation if not already defined
         try:
             logging.info("Regenerating marker list")
             with open(f'{temp_folder}/{marker_list_file}') as f:
@@ -613,25 +606,25 @@ if args.start == "plots" or args.start == "all":
                 logging.info("Proceeding without header. This may cause issues in subsequent steps.")
                 header = ""
 
-        # bed_file execution
-        try:
-            logging.info("Executing region_bed function")
-            if all(var is not None for var in [temp_folder, header, commands, marker_list, bed_file]):
-                region_bed(temp_folder, header, commands, marker_list, bed_file)
-                logging.info(f"Bed file created successfully: {bed_file}")
-            else:
-                missing_vars = [var for var in ['temp_folder', 'header', 'commands', 'marker_list', 'bed_file'] if locals().get(var) is None]
-                logging.info(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
-        except Exception as region_bed_error:
-            logging.info(f"Error in region_bed: {region_bed_error}")
-            logging.info("Failed to create bed file. This may affect subsequent steps.")
+            # bed_file execution
+            try:
+                logging.info("Executing region_bed function")
+                if all(var is not None for var in [temp_folder, header, commands, marker_list, bed_file]):
+                    region_bed(temp_folder, header, commands, marker_list, bed_file)
+                    logging.info(f"Bed file created successfully: {bed_file}")
+                else:
+                    missing_vars = [var for var in ['temp_folder', 'header', 'commands', 'marker_list', 'bed_file'] if locals().get(var) is None]
+                    logging.info(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
+            except Exception as region_bed_error:
+                logging.info(f"Error in region_bed: {region_bed_error}")
+                logging.info("Failed to create bed file. This may affect subsequent steps.")
 
-    # Check if bed file was created
-    if check_file_exists(bed_file):
-        logging.info(f"Bed file exists at: {bed_file}")
-    else:
-        logging.info(f"Warning: Bed file not found at: {bed_file}")
-        logging.info("This may affect IGV screenshot generation.")
+        # Check if bed file was created
+        if check_file_exists(bed_file):
+            logging.info(f"Bed file exists at: {bed_file}")
+        else:
+            logging.info(f"Warning: Bed file not found at: {bed_file}")
+            logging.info("This may affect IGV screenshot generation.")
         
     # Plotting Logic
     if not args.manual_plots:
