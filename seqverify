@@ -514,24 +514,24 @@ if args.start == "readout" or args.start == "all":
     logging.info(f"Markers: {marker_list}")
 
     # Check if aligned diff chr file exists
-    if not check_file_exists(aligned_diff_chr):
+    if not check_file_exists(f'{temp_folder}/{aligned_diff_chr}'):
         logging.error(f"Aligned diff chr file not found: {aligned_diff_chr}")
         sys.exit(1)
 
     # Check file size
-    file_size = os.path.getsize(aligned_diff_chr)
+    file_size = os.path.getsize(f'{temp_folder}/{aligned_diff_chr}')
     logging.info(f"Aligned diff chr file size: {file_size} bytes")
 
     if file_size == 0:
-        logging.warning(f"Aligned diff chr file is empty: {aligned_diff_chr}")
+        logging.warning(f"Aligned diff chr file is empty: f'{temp_folder}/{aligned_diff_chr}'")
 
     # Process data
-    logging.info(f"Grouping alignment data from file: {aligned_diff_chr}")
-    data = group(aligned_diff_chr)
+    logging.info(f"Grouping alignment data from file: f'{temp_folder}/{aligned_diff_chr}'")
+    data = group(f'{temp_folder}/{aligned_diff_chr}')
     
     if data is None:
         logging.warning("No data found in aligned diff chr file. This might indicate an issue with the alignment process or file content.")
-        with open(aligned_diff_chr_bam, 'r') as f:
+        with open(f'{temp_folder}/{aligned_diff_chr}', 'r') as f:
             first_lines = f.readlines(10) 
         logging.warning(f"First few lines of the aligned diff chr file:\n{''.join(first_lines)}")
         
