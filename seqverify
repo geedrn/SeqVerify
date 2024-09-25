@@ -353,7 +353,7 @@ if args.start == "beginning" or args.start == "all":
             sys.exit(1)
         
         # Create an empty marker list file
-        with open(marker_list_file, 'w') as f:
+        with open(f'{temp_folder}/{marker_list_file}', 'w') as f:
             pass
         logging.info(f"Created empty marker list file: {marker_list_file}")
 
