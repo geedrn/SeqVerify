@@ -325,13 +325,11 @@ if args.start == "beginning" or args.start == "all":
     print("Beginning genome index preparation...")
     logging.info("Beginning genome index preparation")
     
-    if marker_sources_path is not None:
-        if exact_path is None:
-            # Copies the reference genome into a new FASTA file that the transgenes will also be added to
-            logging.info(f"Copying reference genome to: {temp_folder}/{genome_with_markers}")
-            if not run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}'):
-                logging.info("Failed to copy reference genome. Exiting.")
-                sys.exit(1)
+    if marker_sources_path:
+        # Create an empty marker list file
+        with open(f'{temp_folder}/{marker_list_file}', 'w') as f:
+            pass
+        logging.info(f"Created empty marker list file: {temp_folder}/{marker_list_file}")
 
         for file in marker_sources_path:
             if not check_file_exists(file):
@@ -347,12 +345,23 @@ if args.start == "beginning" or args.start == "all":
         if not append_file_content(f'{temp_folder}/{marker_list_file}', f'{temp_folder}/{genome_with_markers}'):
             logging.info("Failed to add collated markers to genome file. Exiting.")
             sys.exit(1)
-            
-    if marker_sources_path is None:
-        logging.info("No marker sources specified. Skipping marker addition to genome.")
+    else:
+        # If no marker sources are specified, just copy the reference genome
+        logging.info("No marker sources specified. Copying reference genome without modifications.")
         if not run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}'):
             logging.error("Failed to copy reference genome. Exiting.")
             sys.exit(1)
+        
+        # Create an empty marker list file
+        with open(marker_list_file, 'w') as f:
+            pass
+        logging.info(f"Created empty marker list file: {marker_list_file}")
+
+    # Check the final genome file
+    if check_file_exists(f'{temp_folder}/{genome_with_markers}'):
+        logging.info(f"Final genome file size: {os.path.getsize(f'{temp_folder}/{genome_with_markers}')} bytes")
+    else:
+        logging.error(f"Final genome file not found: {temp_folder}/{genome_with_markers}")
 
     # Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
     logging.info(f"Building BWA index for: {temp_folder}/{genome_with_markers}")
@@ -432,15 +441,40 @@ if args.start == "markers" or args.start == "all":
             logging.info(f"Aligned SAM file not found: {temp_folder}/{aligned_with_markers}")
             sys.exit(1)
 
-        # Process alignments
         samtools_view_cmd = f"samtools view -h -@ {threads} {temp_folder}/{aligned_with_markers}"
-        gawk_cmd = f"gawk '{{if ((($3 ~ /^({markers})/)&&($7 ~ /chr([0-9]+|[XY{'M' if not args.mitochondrial else ''}])/))||($1 ~ /^@/)) logging $0}}'"
+        gawk_cmd = f"gawk '{{if ((($3 ~ /^({markers})/)&&($7 ~ /chr([0-9]+|[XY{'M' if not args.mitochondrial else ''}])/))||($1 ~ /^@/)) print $0}}'"
         full_cmd = f"{samtools_view_cmd} | {gawk_cmd} > {temp_folder}/{aligned_diff_chr}"
-        
-        logging.info("Processing alignments to find transgene insertions")
+
+        logging.info(f"Markers: {markers}")
+        logging.info(f"Full command: {full_cmd}")
+
+        # command execution
         if not run_command(full_cmd):
-            logging.info("Failed to process alignments")
+            logging.error("Failed to process alignments")
             sys.exit(1)
+
+        # 結果の確認
+        if os.path.exists(f"{temp_folder}/{aligned_diff_chr}"):
+            file_size = os.path.getsize(f"{temp_folder}/{aligned_diff_chr}")
+            logging.info(f"Size of {aligned_diff_chr}: {file_size} bytes")
+            if file_size == 0:
+                logging.warning(f"{aligned_diff_chr} is empty. This might indicate an issue with the filtering process.")
+                
+                # 入力ファイルの確認
+                input_file_size = os.path.getsize(f"{temp_folder}/{aligned_with_markers}")
+                logging.info(f"Size of input file {aligned_with_markers}: {input_file_size} bytes")
+                
+                # サンプルの入力を確認
+                sample_input_cmd = f"samtools view -h {temp_folder}/{aligned_with_markers} | head -n 10"
+                result = subprocess.run(sample_input_cmd, shell=True, capture_output=True, text=True)
+                logging.info(f"Sample input:\n{result.stdout}")
+                
+                # フィルタリング条件を緩和してテスト
+                test_cmd = f"{samtools_view_cmd} | gawk '{{print $0}}' | head -n 10"
+                result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
+                logging.info(f"Test output without filtering:\n{result.stdout}")
+        else:
+            logging.error(f"{aligned_diff_chr} was not created")            
 
         # Sort and index BAM file
         logging.info("Sorting and indexing BAM file")
@@ -477,20 +511,35 @@ if args.start == "readout" or args.start == "all":
     with open(f'{temp_folder}/{marker_list_file}') as f:
         marker_list = [i[1:].strip() for i in f if i.startswith('>')]
     logging.info(f"Processed {len(marker_list)} markers from marker list file")
+    logging.info(f"Markers: {marker_list}")
 
     # Check if aligned diff chr file exists
-    if not check_file_exists(f'{temp_folder}/{aligned_diff_chr}'):
-        logging.info(f"Aligned diff chr file not found: {temp_folder}/{aligned_diff_chr}")
+    if not check_file_exists(aligned_diff_chr):
+        logging.error(f"Aligned diff chr file not found: {aligned_diff_chr}")
         sys.exit(1)
 
+    # Check file size
+    file_size = os.path.getsize(aligned_diff_chr)
+    logging.info(f"Aligned diff chr file size: {file_size} bytes")
+
+    if file_size == 0:
+        logging.warning(f"Aligned diff chr file is empty: {aligned_diff_chr}")
+
     # Process data
-    logging.info("Grouping alignment data")
-    data = group(f'{temp_folder}/{aligned_diff_chr}')
+    logging.info(f"Grouping alignment data from file: {aligned_diff_chr}")
+    data = group(aligned_diff_chr)
+    
     if data is None:
-        logging.info("No data found in aligned diff chr file")
+        logging.warning("No data found in aligned diff chr file. This might indicate an issue with the alignment process or file content.")
+        with open(aligned_diff_chr_bam, 'r') as f:
+            first_lines = f.readlines(10) 
+        logging.warning(f"First few lines of the aligned diff chr file:\n{''.join(first_lines)}")
         
-    if data is not None:
-        logging.info("Compressing insertion data")
+    else:
+        logging.info(f"Successfully grouped alignment data. Number of reference chromosomes: {len(data)}")
+        for ref_chrom, alignments in data.items():
+            logging.info(f"Reference chromosome {ref_chrom} has alignments to {len(alignments)} chromosomes")
+
         insertions = compress(data, granularity_threshold)
         if insertions is None:
             logging.info("No insertions found in data")
