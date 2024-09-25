@@ -103,29 +103,34 @@ if args.config is not None:
 if args.download_defaults: #If --download_defaults is set, downloads the three databases and quits the program
     #Note:  These FTP links are likely to change over time and break the command. 
     #       Please open an issue on GitHub if they do! https://github.com/mpiersonsmela/SeqVerify
+    print("Downloading default files...")
+    print("Making seqverify_defaults directory...")
     if not run_command('mkdir seqverify_defaults'):
         print("Error: Failed to create folder seqverify_defaults")
         sys.exit(1)
 
     #Downloads chm13v2.0 as a reference genome for everything except the variant calling
+    print("Downloading T2T CHM13 fasta file...")
     if not run_command('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download chm13v2.0.fa.gz")
         sys.exit(1)
-        
+      
     if not run_command('gunzip seqverify_defaults/chm13v2.0.fa.gz'):
         print("Error: Failed to unzip chm13v2.0.fa.gz")
         sys.exit(1)
 
     #Downloads chm13v2.0's gff3 file for gtf editing
+    print("Downloading T2T CHM13 gff3 file...")
     if not run_command('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/annotation/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz")
         sys.exit(1)
-        
+    
     if not run_command('gunzip seqverify_defaults/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz'):
         print("Error: Failed to unzip chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz")
         sys.exit(1)
 
     #Downloads GRCh38 version 105 primary assembly (no alt contigs) as a reference genome for the variant calling
+    print("Downloading GRCh38 assembly fasta file...")
     if not run_command('curl -OJX GET "https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz")
         sys.exit(1)
@@ -135,10 +140,12 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         sys.exit(1)
 
     #Downloads a KRAKEN-valid 8GB database, PlusPF_8GB
+    print("Making seqverify_defaults/seqverify_database")
     if not run_command('mkdir seqverify_defaults/seqverify_database'):
         print("Error: Failed to make seqverify_defaults/seqverify_database directory")
         sys.exit(1)
-        
+    
+    print("Getting kraken database...")
     if not run_command('curl -OJX GET "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20230605.tar.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download kraken database")
         sys.exit(1)
@@ -148,11 +155,13 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         sys.exit(1)
 
     #Downloads the snpEff config file for ease of access during variant calling
+    print("Downloading snpEFF config file...")
     if not run_command('curl -OJX GET "https://raw.githubusercontent.com/pcingola/SnpEff/master/config/snpEff.config" --output-dir seqverify_defaults'):
         print("Error: Failed to download snpEff.config")
         sys.exit(1)
 
     #Downloads the latest version of the ClinVar database for variant calling purposes
+    print("Downloading clinvar vcf file...")
     if not run_command('curl -OJX GET "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download clinvar.vcf.gz")
         sys.exit(1)
@@ -358,10 +367,10 @@ if args.start == "align" or args.start == "all":
 
     # Check if input files exist
     if not check_file_exists(f"{temp_folder}/{genome_with_markers}"):
-        logging.info("Genome file not found. Exiting.")
+        logging.info("Collated fasta file not found. Exiting.")
         sys.exit(1)
     if not check_file_exists(reads_1_path) or not check_file_exists(reads_2_path):
-        logging.info("Read files not found. Exiting.")
+        logging.info("fastq files not found. Exiting.")
         sys.exit(1)
 
     # Aligns the new genome using BWA-MEM
