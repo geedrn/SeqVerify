@@ -2,28 +2,55 @@
 import os
 import matplotlib.pyplot as plt
 from collections import OrderedDict
+import logging
+import traceback
 
-def region_bed(temp_folder,sam_header,commands,chr_list,output, zoomout = 200): #Generates .bed file necessary for running the other functions
-    with open(f"{temp_folder}/{output}","w+") as bed: #Creates a new bed file
-        if chr_list != []:
-            with open(f"{temp_folder}/{sam_header}") as file:
-                for line in file:
-                    tags = line.split("\t") #Parses the file line-by-line, finding each tab-separated tag.
-                    if tags[0] == '@SQ': #Collects all sequence/chromosome lines in the header
-                        chr_name = tags[1].split(":")[1] #Takes the chromosome/transgene's name
-                        if chr_name in chr_list: #Excludes all the names we don't want (i.e. usually all the human non-transgene chromosomes)
-                            end = int(tags[2].split(":")[1])-1 #Calculates 0-indexed final coordinate of transgene (SAM files are 1-indexed, .bed files are )
-                            bed.write(f"{chr_name}\t1\t{end}\n") #Writes the coordinates to the file #NOTE: starting at 1 to avoid IGV problems
-                    else:
-                        continue
-        if commands is not None:
-            for command in commands:
-                fields = str(command).split("\t")
-                chr, start, seq = fields[0].split(":")[0], int(fields[0].split(":")[1].split("-")[0]), len(fields[1])
-                if start > zoomout:
-                    start -= zoomout
-                seq += zoomout ### TODO: check if this will go over the end of the chromosome. For now, users should decrease zoomout if near the end of the chromosome
-                bed.write(f"{chr}\t{str(start)}\t{int(start)+int(seq)}\n")
+import logging
+
+def region_bed(temp_folder, sam_header, commands, chr_list, output, zoomout=200):
+    logging.info(f"Starting region_bed function with parameters:")
+    logging.info(f"temp_folder: {temp_folder}, sam_header: {sam_header}, output: {output}, zoomout: {zoomout}")
+    logging.info(f"chr_list: {chr_list}")
+    logging.info(f"commands: {commands}")
+
+    try:
+        with open(f"{temp_folder}/{output}", "w+") as bed:
+            if chr_list:
+                logging.info("Processing chromosome list from SAM header")
+                with open(f"{temp_folder}/{sam_header}") as file:
+                    for line in file:
+                        tags = line.strip().split("\t")
+                        if tags[0] == '@SQ':
+                            chr_name = tags[1].split(":")[1]
+                            if chr_name in chr_list:
+                                end = int(tags[2].split(":")[1]) - 1
+                                bed_line = f"{chr_name}\t1\t{end}\n"
+                                bed.write(bed_line)
+                                logging.info(f"Added chromosome line: {bed_line.strip()}")
+            
+            if commands is not None:
+                logging.info("Processing commands")
+                for command in commands:
+                    fields = str(command).split("\t")
+                    chr, start, seq = fields[0].split(":")[0], int(fields[0].split(":")[1].split("-")[0]), len(fields[1])
+                    if start > zoomout:
+                        start -= zoomout
+                    seq += zoomout
+                    bed_line = f"{chr}\t{str(start)}\t{int(start)+int(seq)}\n"
+                    bed.write(bed_line)
+                    logging.info(f"Added command line: {bed_line.strip()}")
+
+        logging.info(f"BED file creation completed: {temp_folder}/{output}")
+        
+        # DEBUG: Read the content of the BED file
+        with open(f"{temp_folder}/{output}", "r") as f:
+            content = f.read()
+            logging.info(f"BED file content:\n{content}")
+        
+        return True
+    except Exception as e:
+        logging.error(f"Error in region_bed function: {str(e)}")
+        return False
 
 def histogramData(coveragemap, chromosome, granularity=1): #Collects data to make a single histogram if IGV is not used
     os.system(f"gawk '{{if ($1 ~ /({chromosome})\>/) print $0}};' {coveragemap} > {chromosome}_coverage.cov") #gawks the output of samtools depth -b for the reads relevant to the chromosome
@@ -117,15 +144,48 @@ def igvScreenshot(temp_folder,folder,alignments,genome,bed_file,imageformat="png
     print(igv_cmd) # for debug
     os.system(igv_cmd) #runs XVFB, a headerless server emulator, to run IGV automatically without the need for a GUI.
     
-def igvScreenshot_new(temp_folder,folder,alignments,genome,bed_file,imageformat="png",gtf_file=None): #If using IGV, deals with IGV logic
-    if gtf_file != None:
-        cmd_str = f"create_report {temp_folder}/{bed_file} --fasta {genome} --standalone --flanking 1000 --sequence 1 --begin 2 --end 3 --tracks {alignments} {folder}/{gtf_file} --output {folder}/igv_viewer.html"
-        print(cmd_str)
-        os.system(cmd_str)
-    else:
-        cmd_str = f"create_report {temp_folder}/{bed_file} --fasta {genome} --standalone --flanking 1000 --sequence 1 --begin 2 --end 3 --tracks {alignments} --output {folder}/igv_viewer.html"
-        print(cmd_str)
-        os.system(cmd_str)
+def igvScreenshot_new(temp_folder, folder, alignments, genome, bed_file, imageformat="png", gtf_file=None):
+    try:
+        # DEBUG: bed file path
+        if not os.path.exists(f"{temp_folder}/{bed_file}"):
+            raise FileNotFoundError(f"BED file not found: {temp_folder}/{bed_file}")
+
+        # DEBUG: genome file path
+        if not os.path.exists(genome):
+            raise FileNotFoundError(f"Genome file not found: {genome}")
+
+        # DEBUG: alignment file path
+        if not os.path.exists(alignments):
+            raise FileNotFoundError(f"Alignment file not found: {alignments}")
+
+        base_cmd = f"create_report {temp_folder}/{bed_file} --fasta {genome} --standalone --flanking 1000 --sequence 1 --begin 2 --end 3 --tracks {alignments}"
+
+        if gtf_file is not None:
+            if not os.path.exists(f"{folder}/{gtf_file}"):
+                raise FileNotFoundError(f"GTF file not found: {folder}/{gtf_file}")
+            cmd_str = f"{base_cmd} {folder}/{gtf_file} --output {folder}/igv_viewer.html"
+        else:
+            cmd_str = f"{base_cmd} --output {folder}/igv_viewer.html"
+
+        logging.info(f"Executing command: {cmd_str}")
+        print(f"Executing command: {cmd_str}")
+
+        result = os.system(cmd_str)
+
+        if result != 0:
+            raise Exception(f"Command execution failed with exit code: {result}")
+
+        if not os.path.exists(f"{folder}/igv_viewer.html"):
+            raise FileNotFoundError(f"Output file not created: {folder}/igv_viewer.html")
+
+        logging.info("IGV screenshot generation completed successfully")
+        return True
+
+    except Exception as e:
+        logging.error(f"Error in igvScreenshot_new: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        print(f"Error in igvScreenshot_new: {str(e)}")
+        return False
 
 def genome_configurator(temp_folder,pytor_conf,gc_name,genome,sam_header):
     special_chrs = {"chrX":"S","chrY":"S","chrM":"M"}

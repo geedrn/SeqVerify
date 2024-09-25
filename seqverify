@@ -593,32 +593,45 @@ if args.start == "plots" or args.start == "all":
         markers = ""
 
     # header re-generation if not already defined
+    header_file_name = f'{temp_folder}/temp_header.sam'
     if 'header' not in locals() or header is None:
         logging.warning("Warning: 'header' is not defined. Attempting to recreate it.")
         try:
             logging.info("Retrieving header from BAM file")
-            if not run_command(f'samtools view -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/temp_header.sam'):
+            if not run_command(f'samtools view -H {folder_insertion}/{aligned_diff_chr_bam} > {header_file_name}'):
                 raise Exception("Failed to retrieve header from BAM file")
-            with open(f'{temp_folder}/temp_header.sam', 'r') as header_file:
-                header = header_file.read()
-            logging.info("Header successfully recreated.")
+            logging.info(f"Header successfully recreated and saved to {header_file_name}")
+            
+            # ヘッダーの内容を確認
+            with open(header_file_name, 'r') as f:
+                header_content = f.read()
+            logging.info(f"Header content (first 200 characters): {header_content[:200]}")
+            
+            header = header_file_name  # ヘッダーファイルの名前を保存
         except Exception as header_error:
             logging.error(f"Error recreating header: {header_error}")
             logging.warning("Proceeding without header. This may cause issues in subsequent steps.")
-            header = ""
-            
+            header = None
+
     # bed_file execution
     try:
         print("Executing region_bed function")
         logging.info("Executing region_bed function")
+        logging.info(f"temp_folder: {temp_folder}")
+        logging.info(f"header file: {header}")
+        logging.info(f"commands: {commands}")
+        logging.info(f"marker_list: {marker_list}")
+        logging.info(f"bed_file: {bed_file}")
+        
         if all(var is not None for var in [temp_folder, header, commands, marker_list, bed_file]):
             region_bed(temp_folder, header, commands, marker_list, bed_file)
             logging.info(f"Bed file created successfully: {bed_file}")
         else:
             missing_vars = [var for var in ['temp_folder', 'header', 'commands', 'marker_list', 'bed_file'] if locals().get(var) is None]
             logging.error(f"Error: Missing required variables for region_bed: {', '.join(missing_vars)}")
+            
     except Exception as region_bed_error:
-        print("Error in creating bed file")
+        print(f"Error in creating bed file: {region_bed_error}")
         logging.error(f"Error in region_bed: {region_bed_error}")
         logging.warning("Failed to create bed file. This may affect subsequent steps.")
 
@@ -636,8 +649,17 @@ if args.start == "plots" or args.start == "all":
             gtf = new_gtf_sorted  # don't put {folder_insertion} at the front
         else:
             gtf = None
-        if not igvScreenshot_new(temp_folder, folder_insertion, f'{folder_insertion}/{aligned_diff_chr_bam}', f'{folder_insertion}/{genome_with_markers}', bed_file, gtf_file=gtf):
-            logging.info("Failed to generate IGV screenshots")
+        
+        try:
+            logging.info(f"Attempting to generate IGV screenshots with parameters: temp_folder={temp_folder}, folder_insertion={folder_insertion}, bam={folder_insertion}/{aligned_diff_chr_bam}, genome={folder_insertion}/{genome_with_markers}, bed_file={bed_file}, gtf_file={gtf}")
+            result = igvScreenshot_new(temp_folder, folder_insertion, f'{folder_insertion}/{aligned_diff_chr_bam}', f'{folder_insertion}/{genome_with_markers}', bed_file, gtf_file=gtf)
+            if not result:
+                raise Exception("IGV screenshot generation returned False")
+            logging.info("Successfully generated IGV screenshots")
+        except Exception as e:
+            logging.error(f"Failed to generate IGV screenshots: {str(e)}")
+            print(f"Error: Failed to generate IGV screenshots: {str(e)}")
+            
     else:
         logging.info("Generating manual plots")
         if not run_command(f'samtools depth -b {bed_file} {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{overall_coverage}'):
