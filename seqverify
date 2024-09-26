@@ -11,6 +11,7 @@ from seqver_genomeupdate import *
 from seqver_lofFinder import *
 from seqver_gtf import *
 import logging
+import pysam
 
 parser = argparse.ArgumentParser()
 
@@ -435,64 +436,71 @@ if args.start == "markers" or args.start == "all":
         sys.exit(1)
 
     if not marker_sources_path:
-        logging.info("No marker sequences specified. Skipping marker processing.")
+        logging.info("No marker sequences specified. Skipping marker detection.")
     else:
         #Check if marker list file exists
         if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
             logging.info(f"Marker list file not found: {temp_folder}/{marker_list_file}")
             sys.exit(1)
-
-        #Read marker list
-        with open(f'{temp_folder}/{marker_list_file}') as f:
-            marker_list = [i[1:].strip() for i in f if i.startswith('>')]
-        markers = "|".join(marker_list)
-        logging.info(f"Processed {len(marker_list)} markers")
+        
+        # marker list
+        markers = []
+        with open(f'{temp_folder}/{marker_list_file}', 'r') as f:
+            for line in f:
+                if line.startswith('>'):
+                    markers.append(line.strip()[1:])  # '>' is removed from the marker name
+        
+        print(f"Markers: {markers}")            
+        logging.info(f"Markers: {markers}")
 
         #Add mitochondrial marker if specified
         if args.mitochondrial:
             markers += "|chrM"
             logging.info("Added mitochondrial marker")
 
-        #Check if aligned SAM file exists
-        if not check_file_exists(f'{temp_folder}/{aligned_with_markers}'):
-            logging.info(f"Aligned SAM file not found: {temp_folder}/{aligned_with_markers}")
-            sys.exit(1)
+        for marker in markers:
+            samtools_command = f"""
+            samtools view -h {temp_folder}/{aligned_with_markers} | 
+            awk '
+                {{
+                    if ($0 ~ /^@/) {{
+                        print $0;  # output header lines
+                    }} else if ($3 == "{marker}" && ($7 != "=" || (cigar[1] == "S" || cigar[length(cigar)] == "S"))) {{
+                        # Case 1: Pair of reads mapped to different references (chimeric pair) or
+                        # Case 2: Soft-clipped reads (chimeric alignment within the same read)
+                        print $0;
+                    }}
+                }}
+            ' > {temp_folder}/{aligned_diff_chr}
+            """
 
-        samtools_view_cmd = f"samtools view -h -@ {threads} {temp_folder}/{aligned_with_markers}"
-        #Filter reads if either the read or the mate is aligned to a marker
-        gawk_cmd = f"gawk '{{if (($3 ~ /^({markers})/) || ($7 ~ /^({markers})/) || ($1 ~ /^@/)) print $0}}'"
-        full_cmd = f"{samtools_view_cmd} | {gawk_cmd} > {temp_folder}/{aligned_diff_chr}"
+            try:
+                run_command(samtools_command)
+                logging.info(f"Successfully processed alignments for {marker} and wrote results to {temp_folder}/{aligned_diff_chr}")
+                
+                # Check the number of reads in the output SAM file
+                result = run_command(f"samtools view -c {temp_folder}/{aligned_diff_chr}")
+                read_count = int(result.strip())
+                logging.info(f"Number of reads in output file for {marker}: {read_count}")
 
-        logging.info(f"Markers: {markers}")
-        logging.info(f"Full command: {full_cmd}")
+                if read_count == 0:
+                    logging.warning(f"{aligned_diff_chr} is empty. This might indicate an issue with the filtering process for {marker}.")
+                else:
+                    logging.info(f"Successfully filtered chimeric reads for marker {marker}.")
 
-        #command execution
-        if not run_command(full_cmd):
-            logging.error("Failed to process alignments")
-            sys.exit(1)
+            except Exception as e:
+                logging.error(f"Failed to process alignments for marker {marker}: {str(e)}")
+                sys.exit(1)
 
-        #check if output file was created
+        # Check if output file was created
         if os.path.exists(f"{temp_folder}/{aligned_diff_chr}"):
             file_size = os.path.getsize(f"{temp_folder}/{aligned_diff_chr}")
             logging.info(f"Size of {aligned_diff_chr}: {file_size} bytes")
             if file_size == 0:
                 logging.warning(f"{aligned_diff_chr} is empty. This might indicate an issue with the filtering process.")
-                
-                #check if input file was created
-                input_file_size = os.path.getsize(f"{temp_folder}/{aligned_with_markers}")
-                logging.info(f"Size of input file {aligned_with_markers}: {input_file_size} bytes")
-                
-                #Print sample input and output
-                sample_input_cmd = f"samtools view -h {temp_folder}/{aligned_with_markers} | head -n 10"
-                result = subprocess.run(sample_input_cmd, shell=True, capture_output=True, text=True)
-                logging.info(f"Sample input:\n{result.stdout}")
-                
-                #Debugging: Print sample output
-                test_cmd = f"{samtools_view_cmd} | gawk '{{print $0}}' | head -n 10"
-                result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
-                logging.info(f"Test output without filtering:\n{result.stdout}")
         else:
-            logging.error(f"{aligned_diff_chr} was not created")            
+            logging.error(f"{aligned_diff_chr} was not created")
+            sys.exit(1)    
 
     #Sort and index BAM file
     logging.info("Sorting and indexing BAM file")

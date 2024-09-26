@@ -133,14 +133,12 @@ class SamAlignment:
                 alignments.append([chrom, int(pos)])
         return alignments
 
-    def allPositions(self, tag_list=['SA', 'XA']):
-        positions = [[self.RNAME, self.POS]]  # Primary alignment
-        if self.RNEXT != '=' and self.RNEXT != '*':
-            positions.append([self.RNEXT, int(self.PNEXT)])  # Mate alignment
-        if 'XA' in tag_list:
-            positions.extend(self.parse_xa_tag())
-        if 'SA' in tag_list:
-            positions.extend(self.parse_sa_tag())
+    def allPositions(self):
+        positions = [self.position()]
+        mate_position = self.matePosition()
+        if mate_position[0] != '*':  # '*' は未マップを示す
+            positions.append(mate_position)
+        positions.extend(self.supplementaryPosition(supp_tags))
         return positions
 
     def optionalTag(self,tag_code): #finds optional tag (if it exists, otherwise returns None) and separates it into [TAG,TYPE,VALUE] as determined in the SAM manual
@@ -187,7 +185,11 @@ class SamAlignment:
         return [self.RNAME,int(self.POS)] #used to be just the int() statement
 
     def matePosition(self):
-        return [self.RNEXT,int(self.PNEXT)+self.softClippingLen(self.optionalTag("MC")[-1])] #returns the position of a read's mate
+        mate_pos = int(self.PNEXT)
+        mc_tag = self.optionalTag("MC")
+        if mc_tag is not None:
+            mate_pos += self.softClippingLen(mc_tag[-1])
+        return [self.RNEXT, mate_pos]
 
     def supplementaryPosition(self,tag_list=['SA','XA']): #denotes where positions of supplementary alignments are exactly, given we know those are insertion sites
         positions = []
@@ -222,7 +224,7 @@ def group(samfile): #returns a dictionary containing all reference transgene chr
                 if alignment.startswith("@"): #skips header lines
                     continue
                 alignment = SamAlignment(alignment) #uses our SamAlignment class for ease of use
-                matches = alignment.allPositions(tag_list=supp_tags) #finds all supplementary alignments in the read
+                matches = alignment.allPositions() #finds all supplementary alignments in the read
                 ref_chromosome = matches[0][0] #takes name of ref chromosome
                 all_positions = matches #includes all positions, including the primary alignment
                 
