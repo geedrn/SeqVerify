@@ -342,7 +342,7 @@ if args.start == "beginning" or args.start == "all":
             
             logging.info(f'Adding marker from: {file}')
             if not append_file_content(file, f'{temp_folder}/{marker_list_file}'):
-                logging.caution(f"Failed to append content from {file} to {temp_folder}/{marker_list_file}")
+                logging.warning(f"Failed to append content from {file} to {temp_folder}/{marker_list_file}")
                 continue
 
         # Check if marker list file is not empty
@@ -507,7 +507,7 @@ if args.start == "readout" or args.start == "all":
     
     # Check if either untargeted or targeted is specified
     if not (args.untargeted or args.targeted):
-        logging.caution("Neither untargeted nor targeted markers specified. Skipping readout processing.")
+        logging.warning("Neither untargeted nor targeted markers specified. Skipping readout processing.")
         print("Neither untargeted nor targeted markers specified. Skipping readout processing.")
     else:
         # Check if marker list file exists
@@ -539,9 +539,6 @@ if args.start == "readout" or args.start == "all":
         
         if data is None:
             logging.warning("No data found in aligned diff chr file. This might indicate an issue with the alignment process or file content.")
-            with open(f'{temp_folder}/{aligned_diff_chr}', 'r') as f:
-                first_lines = f.readlines(10) 
-            logging.warning(f"First few lines of the aligned diff chr file:\n{''.join(first_lines)}")
             
         else:
             logging.info(f"Successfully grouped alignment data. Number of reference chromosomes: {len(data)}")
@@ -552,18 +549,20 @@ if args.start == "readout" or args.start == "all":
             if insertions is None:
                 logging.info("No insertions found in data")
 
-            logging.info("Filtering and scoring insertions")
-            filteredInsertions = filterAndScore(temp_folder, folder_insertion, aligned_diff_chr_bam, insertions, args.spurious_filtering_threshold, args.stringency)
-            if filteredInsertions is None:
-                logging.info("No insertions passed filtering and scoring")
+            else:
+                logging.info(f"Compressed insertions: {len(insertions)}")
+                logging.info("Filtering and scoring insertions")
+                filteredInsertions = filterAndScore(temp_folder, folder_insertion, aligned_diff_chr_bam, insertions, args.spurious_filtering_threshold, args.stringency)
+                if filteredInsertions is None:
+                    logging.info("No insertions passed filtering and scoring")
 
-            logging.info("Generating readout")
-            # Note: filteredInsertions[0] (original_dict) is not used in the current implementation of readout function
-            success = readout(folder_insertion, filteredInsertions[1], marker_list, min_matches)
-            if not success:
-                logging.error("Failed to generate readout")
-                print("Error: Failed to generate readout. Check the log for details.")
-                sys.exit(1)
+                logging.info("Generating readout")
+                # Note: filteredInsertions[0] (original_dict) is not used in the current implementation of readout function
+                success = readout(folder_insertion, filteredInsertions[1], marker_list, min_matches)
+                if not success:
+                    logging.error("Failed to generate readout")
+                    print("Error: Failed to generate readout. Check the log for details.")
+                    sys.exit(1)
             logging.info("Readout processing completed")
 
         if args.keepgoing:
@@ -797,6 +796,7 @@ if args.start == "kraken" or args.start == "all":
         args.start = "variant"
 
 if args.start == "variant" or args.start == "all":
+    print("Starting variant calling")
     logging.info("Starting variant calling")
 
     if not run_command(f'mkdir -p {folder_snp}'):
