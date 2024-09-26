@@ -459,7 +459,8 @@ if args.start == "markers" or args.start == "all":
             sys.exit(1)
 
         samtools_view_cmd = f"samtools view -h -@ {threads} {temp_folder}/{aligned_with_markers}"
-        gawk_cmd = f"gawk '{{if ((($3 ~ /^({markers})/)&&($7 ~ /chr([0-9]+|[XY{'M' if not args.mitochondrial else ''}])/))||($1 ~ /^@/)) print $0}}'"
+        #Filter reads if either the read or the mate is aligned to a marker
+        gawk_cmd = f"gawk '{{if (($3 ~ /^({markers})/) || ($7 ~ /^({markers})/) || ($1 ~ /^@/)) print $0}}'"
         full_cmd = f"{samtools_view_cmd} | {gawk_cmd} > {temp_folder}/{aligned_diff_chr}"
 
         logging.info(f"Markers: {markers}")
@@ -470,43 +471,43 @@ if args.start == "markers" or args.start == "all":
             logging.error("Failed to process alignments")
             sys.exit(1)
 
-        #結果の確認
+        #check if output file was created
         if os.path.exists(f"{temp_folder}/{aligned_diff_chr}"):
             file_size = os.path.getsize(f"{temp_folder}/{aligned_diff_chr}")
             logging.info(f"Size of {aligned_diff_chr}: {file_size} bytes")
             if file_size == 0:
                 logging.warning(f"{aligned_diff_chr} is empty. This might indicate an issue with the filtering process.")
                 
-                #入力ファイルの確認
+                #check if input file was created
                 input_file_size = os.path.getsize(f"{temp_folder}/{aligned_with_markers}")
                 logging.info(f"Size of input file {aligned_with_markers}: {input_file_size} bytes")
                 
-                #サンプルの入力を確認
+                #Print sample input and output
                 sample_input_cmd = f"samtools view -h {temp_folder}/{aligned_with_markers} | head -n 10"
                 result = subprocess.run(sample_input_cmd, shell=True, capture_output=True, text=True)
                 logging.info(f"Sample input:\n{result.stdout}")
                 
-                #フィルタリング条件を緩和してテスト
+                #Debugging: Print sample output
                 test_cmd = f"{samtools_view_cmd} | gawk '{{print $0}}' | head -n 10"
                 result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
                 logging.info(f"Test output without filtering:\n{result.stdout}")
         else:
             logging.error(f"{aligned_diff_chr} was not created")            
 
-        #Sort and index BAM file
-        logging.info("Sorting and indexing BAM file")
-        if not run_command(f"samtools sort -@ {threads} {temp_folder}/{aligned_with_markers} > {folder_insertion}/{aligned_diff_chr_bam}"):
-            logging.error("Failed to sort BAM file")
-            sys.exit(1)
-        if not run_command(f"samtools index -@ {threads} {folder_insertion}/{aligned_diff_chr_bam}"):
-            logging.error("Failed to index BAM file")
-            sys.exit(1)
+    #Sort and index BAM file
+    logging.info("Sorting and indexing BAM file")
+    if not run_command(f"samtools sort -@ {threads} {temp_folder}/{aligned_with_markers} > {folder_insertion}/{aligned_diff_chr_bam}"):
+        logging.error("Failed to sort BAM file")
+        sys.exit(1)
+    if not run_command(f"samtools index -@ {threads} {folder_insertion}/{aligned_diff_chr_bam}"):
+        logging.error("Failed to index BAM file")
+        sys.exit(1)
 
-        #Create header from BAM file
-        logging.info("Creating header from BAM file")
-        if not run_command(f'samtools view -@ {threads} -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{header}'):
-            logging.error("Failed to create header from BAM file")
-            sys.exit(1)
+    #Create header from BAM file
+    logging.info("Creating header from BAM file")
+    if not run_command(f'samtools view -@ {threads} -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{header}'):
+        logging.error("Failed to create header from BAM file")
+        sys.exit(1)
 
     logging.info("Marker processing completed")
 
