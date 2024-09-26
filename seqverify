@@ -27,7 +27,7 @@ parser.add_argument('--verbose', action='store_true', help='Enable verbose outpu
 
 #Genome arguments
 parser.add_argument('--genome', type=str, required=False, default=f"{os.getcwd()}/seqverify_defaults/chm13v2.0.fa") #Name/Path of genome file (CHM13 recommended) used to perform everything but variant calling.
-parser.add_argument('--gtf', type=str, required=False, default=f"{os.getcwd()}/seqverify_defaults/chm13v2.0_RefSeq_Liftoff_v5.1.gff3") #Name/Path of GTF file for editing
+parser.add_argument('--gtf', type=str, required=False, default=f"{os.getcwd()}/seqverify_defaults/chm13v2.0_RefSeq_Liftoff_v5.1.gff3") #Name/Path of gtf file for editing
 
 #KRAKEN2 arguments
 parser.add_argument('--kraken', action='store_const',const=True, required=False,default=False) #Flag enabling KRAKEN2/BRACKEN analysis
@@ -89,7 +89,7 @@ if args.config is not None:
     args.variant_intensity = config["VARIANT"]["variant_intensity"]
     args.variant_window_size = int(config["VARIANT"]["variant_window_size"])
     args.min_quality = int(config["OTHER"]["min_quality"])
-output_name = args.output
+output_name = args.output 
 
 #Stores Variable/Folder Names:
 folder = f"{output_name}_seqverify"
@@ -122,10 +122,38 @@ new_gtf_sorted = f"seqverify_{output_name}.gtf"
 folder_insertion = f"{folder}/insertion"
 folder_cnv = f"{folder}/copy_number"
 folder_kraken = f"{folder}/kraken"
-folder_snp =f"{folder}/variant_calling"
+folder_snp =f"{folder}/variant_calling"   
+
+# File name with output
+def setup_logging(folder, output):
+    try:
+        # Ensure the log directory exists
+        os.makedirs(os.path.dirname(f"{folder}/{output}.log"), exist_ok=True)
+        
+        log_file = f"{folder}/{output}.log"
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        print(f"Logging initialized. Log file: {log_file}")
+        logging.info(f"Logging initialized. Log file: {log_file}")
+    except Exception as e:
+        print(f"Error setting up logging: {str(e)}")
+        raise
+
+setup_logging(folder, args.output)
+print("SeqVerify execution starts")
+logging.info("SeqVerify execution starts")
+
+print("Making main and temp folder")
+logging.info("Making main and temp folder")
+if not run_command(f'mkdir -p {temp_folder}'):
+    print(f"Error: Failed to create folder {temp_folder}")
+    sys.exit(1)
 
 if args.similarity is not None: #similarity also requires --output to be set, takes two arguments: first the original cell line, then the modified cell line, then --min_quality can be set to change the minimum quality (default: 100).
-    compare(args.similarity[0],args.similarity[1],args.min_quality,temp_folder,folder,vcf_similarity, vcf_isec)
+    compare(args.similarity[0],args.similarity[1],args.min_quality,temp_folder,folder,vcf_similarity,vcf_isec)
     sys.exit(0)
 
 #The pathFinder function detects whether arguments are paths or names and acts accordingly such that it can handle both cases for ease of use.
@@ -137,30 +165,19 @@ marker_sources_path = None
 exact_path = None
 database = None
 gtf_file = None
-gtf = None
-    
-# File name with output
-def setup_logging(output=args.output):
-    logging.basicConfig(
-        filename=f"{output}_seqverify.log",
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-
-setup_logging()
-logging.info("SeqVerify execution starts...")    
+gtf = None  
 
 if args.download_defaults: #If --download_defaults is set, downloads the three databases and quits the program
     #Note:  These FTP links are likely to change over time and break the command. 
-    #       Please open an issue on GitHub if they do! https://github.com/mpiersonsmela/SeqVerify
-    print("Downloading default files...")
-    print("Making seqverify_defaults directory...")
+    #      Please open an issue on GitHub if they do! https://github.com/mpiersonsmela/SeqVerify
+    print("Downloading default files")
+    print("Making seqverify_defaults directory")
     if not run_command('mkdir seqverify_defaults'):
         print("Error: Failed to create folder seqverify_defaults")
         sys.exit(1)
 
     #Downloads chm13v2.0 as a reference genome for everything except the variant calling
-    print("Downloading T2T CHM13 fasta file...")
+    print("Downloading T2T CHM13 fasta file")
     if not run_command('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download chm13v2.0.fa.gz")
         sys.exit(1)
@@ -170,7 +187,7 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         sys.exit(1)
 
     #Downloads chm13v2.0's gff3 file for gtf editing
-    print("Downloading T2T CHM13 gff3 file...")
+    print("Downloading T2T CHM13 gff3 file")
     if not run_command('curl -OJX GET "https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/annotation/chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download chm13v2.0_RefSeq_Liftoff_v5.1.gff3.gz")
         sys.exit(1)
@@ -180,7 +197,7 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         sys.exit(1)
 
     #Downloads GRCh38 version 105 primary assembly (no alt contigs) as a reference genome for the variant calling
-    print("Downloading GRCh38 assembly fasta file...")
+    print("Downloading GRCh38 assembly fasta file")
     if not run_command('curl -OJX GET "https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz")
         sys.exit(1)
@@ -195,7 +212,7 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         print("Error: Failed to make seqverify_defaults/seqverify_database directory")
         sys.exit(1)
     
-    print("Getting kraken database...")
+    print("Getting kraken database")
     if not run_command('curl -OJX GET "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20230605.tar.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download kraken database")
         sys.exit(1)
@@ -205,13 +222,13 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
         sys.exit(1)
 
     #Downloads the snpEff config file for ease of access during variant calling
-    print("Downloading snpEFF config file...")
+    print("Downloading snpEFF config file")
     if not run_command('curl -OJX GET "https://raw.githubusercontent.com/pcingola/SnpEff/master/config/snpEff.config" --output-dir seqverify_defaults'):
         print("Error: Failed to download snpEff.config")
         sys.exit(1)
 
     #Downloads the latest version of the ClinVar database for variant calling purposes
-    print("Downloading clinvar vcf file...")
+    print("Downloading clinvar vcf file")
     if not run_command('curl -OJX GET "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz" --output-dir seqverify_defaults'):
         print("Error: Failed to download clinvar.vcf.gz")
         sys.exit(1)
@@ -239,9 +256,6 @@ if args.database is not None:
 
 if args.gtf is not None:
     gtf_file = pathFinder(args.gtf)
-    
-run_command(f'mkdir -p {folder}')
-run_command(f'mkdir -p {temp_folder}')    
 
 if exact_path is not None:
     commands = commandHandler(genome_source_path,exact_path,temp_folder,genome_with_markers,return_commands_only = False)
@@ -279,49 +293,49 @@ if args.start == "beginning" or args.start == "all":
     #Automatic Preparation of Collated Genome:
     #Collates all markers/transgenes into a single FASTA file for ease of handling
     
-    print("Merging transgenes into genome...")
+    print("Merging transgenes into genome")
     logging.info("Automatically preparing collated genome")
     
     if args.gtf is not None:
-        logging.info(f"GTF file specified: {gtf_file}")
+        logging.info(f"gtf file specified: {gtf_file}")
         if check_file_exists(gtf_file):
-            logging.info(f"GTF file exists at: {gtf_file}")
+            logging.info(f"gtf file exists at: {gtf_file}")
             if exact_path is not None:
-                logging.info("Exact path is specified. Proceeding with GTF editing.")
-                print("GTF file specified. Proceeding with GTF editing.")
+                logging.info("Exact path is specified. Proceeding with gtf editing.")
+                print("gtf file specified. Proceeding with gtf editing.")
                 try:
-                    logging.info(f"Attempting to edit GTF file: {gtf_file}")
+                    logging.info(f"Attempting to edit gtf file: {gtf_file}")
                     logging.info(f"Using commands from: {exact_path}")
                     logging.info(f"Temporary folder: {temp_folder}")
                     logging.info(f"Insertion folder: {folder_insertion}")
-                    logging.info(f"Unsorted GTF output: {new_gtf_unsorted}")
-                    logging.info(f"Sorted GTF output: {new_gtf_sorted}")
+                    logging.info(f"Unsorted gtf output: {new_gtf_unsorted}")
+                    logging.info(f"Sorted gtf output: {new_gtf_sorted}")
                     
                     success = gtfEdit(gtf_file, commands, temp_folder, folder_insertion, new_gtf_unsorted, new_gtf_sorted)
                     
                     if success:
-                        logging.info("GTF editing completed successfully")
+                        logging.info("gtf editing completed successfully")
                         logging.info(f"Check for output file: {folder_insertion}/{new_gtf_sorted}")
                     else:
-                        logging.info("GTF editing failed")
+                        logging.info("gtf editing failed")
                 except Exception as e:
-                    logging.info(f"Error during GTF editing: {str(e)}")
-                    logging.info("Proceeding without edited GTF file.")
-                    print("Failed to edit GTF file. Proceeding without edited GTF file.")
+                    logging.info(f"Error during gtf editing: {str(e)}")
+                    logging.info("Proceeding without edited gtf file.")
+                    print("Failed to edit gtf file. Proceeding without edited gtf file.")
             else:
-                logging.info("Exact path is not specified (Targeted option is off). Copying GTF file without modifications.")
+                logging.info("Exact path is not specified (Targeted option is off). Copying gtf file without modifications.")
                 copy_command = f"cp {gtf_file} {folder_insertion}/{new_gtf_sorted}"
                 if run_command(copy_command):
-                    logging.info(f"GTF file copied to: {folder_insertion}/{new_gtf_sorted}")
+                    logging.info(f"gtf file copied to: {folder_insertion}/{new_gtf_sorted}")
                 else:
-                    logging.info(f"Failed to copy GTF file to {folder_insertion}/{new_gtf_sorted}")
+                    logging.info(f"Failed to copy gtf file to {folder_insertion}/{new_gtf_sorted}")
         else:
             pass
     else:
-        print("No GTF file specified. Skipping GTF processing.")
+        print("No gtf file specified. Skipping gtf processing.")
 
-    logging.info("GTF processing complete")
-    print("Beginning genome index preparation...")
+    logging.info("gtf processing complete")
+    print("Beginning genome index preparation")
     logging.info("Beginning genome index preparation")
     
     logging.info(f"Copying reference genome to: {temp_folder}/{genome_with_markers}")
@@ -330,14 +344,14 @@ if args.start == "beginning" or args.start == "all":
         sys.exit(1)
     
     if marker_sources_path:
-        # Create an empty marker list file
+        #Create an empty marker list file
         with open(f'{temp_folder}/{marker_list_file}', 'w') as f:
             pass
         logging.info(f"Created empty marker list file: {temp_folder}/{marker_list_file}")
 
         for file in marker_sources_path:
             if not check_file_exists(file):
-                logging.info(f"Marker source file not found: {file}. Skipping.")
+                logging.info(f"marker sequence file not found: {file}. Skipping.")
                 continue
             
             logging.info(f'Adding marker from: {file}')
@@ -345,10 +359,10 @@ if args.start == "beginning" or args.start == "all":
                 logging.warning(f"Failed to append content from {file} to {temp_folder}/{marker_list_file}")
                 continue
 
-        # Check if marker list file is not empty
+        #Check if marker list file is not empty
         if os.path.getsize(f'{temp_folder}/{marker_list_file}') > 0:
-            # Append the markers to the genome file
-            # logging.info(f'Adding collated markers to: {temp_folder}/{genome_with_markers}')
+            #Append the markers to the genome file
+            #logging.info(f'Adding collated markers to: {temp_folder}/{genome_with_markers}')
             if not append_file_content(f'{temp_folder}/{marker_list_file}', f'{temp_folder}/{genome_with_markers}'):
                 logging.error("Failed to add collated markers to genome file. Exiting.")
                 sys.exit(1)
@@ -357,16 +371,16 @@ if args.start == "beginning" or args.start == "all":
             logging.warning("Marker list file is empty. No markers added to the genome.")
             
     else:
-        logging.info("No marker sources specified. Using reference genome without modifications.")
+        logging.info("No marker sequences specified. Using reference genome without modifications.")
     
-    # Verify the final genome file
+    #Verify the final genome file
     if check_file_exists(f'{temp_folder}/{genome_with_markers}'):
         logging.info(f"Final genome file size: {os.path.getsize(f'{temp_folder}/{genome_with_markers}')} bytes")
     else:
         logging.error(f"Final genome file not found: {temp_folder}/{genome_with_markers}")
         sys.exit(1)
 
-    # Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
+    #Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
     logging.info(f"Building BWA index for: {temp_folder}/{genome_with_markers}")
     if not run_command(f'bwa index -b {base_block} {temp_folder}/{genome_with_markers}'):
         logging.info("Failed to build BWA index. Exiting.")
@@ -385,7 +399,7 @@ if args.start == "align" or args.start == "all":
     print("Starting alignment process")
     logging.info("Starting alignment process")
 
-    # Check if input files exist
+    #Check if input files exist
     if not check_file_exists(f"{temp_folder}/{genome_with_markers}"):
         logging.info("Collated fasta file not found. Exiting.")
         sys.exit(1)
@@ -393,7 +407,7 @@ if args.start == "align" or args.start == "all":
         logging.info("fastq files not found. Exiting.")
         sys.exit(1)
 
-    # Aligns the new genome using BWA-MEM
+    #Aligns the new genome using BWA-MEM
     print("Aligning reads to genome using BWA-MEM")
     logging.info(f"Aligning reads to genome using BWA-MEM with {threads} threads")
     alignment_command = f'bwa mem -M -t {threads} {temp_folder}/{genome_with_markers} {reads_1_path} {reads_2_path} > {temp_folder}/{aligned_with_markers}'
@@ -401,7 +415,7 @@ if args.start == "align" or args.start == "all":
         logging.info("Alignment failed. Exiting.")
         sys.exit(1)
 
-    # Check if output file was created
+    #Check if output file was created
     if not check_file_exists(f"{temp_folder}/{aligned_with_markers}"):
         logging.info("Alignment output file not found. Exiting.")
         sys.exit(1)
@@ -421,25 +435,25 @@ if args.start == "markers" or args.start == "all":
         sys.exit(1)
 
     if not marker_sources_path:
-        logging.info("No marker sources specified. Skipping marker processing.")
+        logging.info("No marker sequences specified. Skipping marker processing.")
     else:
-        # Check if marker list file exists
+        #Check if marker list file exists
         if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
             logging.info(f"Marker list file not found: {temp_folder}/{marker_list_file}")
             sys.exit(1)
 
-        # Read marker list
+        #Read marker list
         with open(f'{temp_folder}/{marker_list_file}') as f:
             marker_list = [i[1:].strip() for i in f if i.startswith('>')]
         markers = "|".join(marker_list)
         logging.info(f"Processed {len(marker_list)} markers")
 
-        # Add mitochondrial marker if specified
+        #Add mitochondrial marker if specified
         if args.mitochondrial:
             markers += "|chrM"
             logging.info("Added mitochondrial marker")
 
-        # Check if aligned SAM file exists
+        #Check if aligned SAM file exists
         if not check_file_exists(f'{temp_folder}/{aligned_with_markers}'):
             logging.info(f"Aligned SAM file not found: {temp_folder}/{aligned_with_markers}")
             sys.exit(1)
@@ -451,35 +465,35 @@ if args.start == "markers" or args.start == "all":
         logging.info(f"Markers: {markers}")
         logging.info(f"Full command: {full_cmd}")
 
-        # command execution
+        #command execution
         if not run_command(full_cmd):
             logging.error("Failed to process alignments")
             sys.exit(1)
 
-        # 結果の確認
+        #結果の確認
         if os.path.exists(f"{temp_folder}/{aligned_diff_chr}"):
             file_size = os.path.getsize(f"{temp_folder}/{aligned_diff_chr}")
             logging.info(f"Size of {aligned_diff_chr}: {file_size} bytes")
             if file_size == 0:
                 logging.warning(f"{aligned_diff_chr} is empty. This might indicate an issue with the filtering process.")
                 
-                # 入力ファイルの確認
+                #入力ファイルの確認
                 input_file_size = os.path.getsize(f"{temp_folder}/{aligned_with_markers}")
                 logging.info(f"Size of input file {aligned_with_markers}: {input_file_size} bytes")
                 
-                # サンプルの入力を確認
+                #サンプルの入力を確認
                 sample_input_cmd = f"samtools view -h {temp_folder}/{aligned_with_markers} | head -n 10"
                 result = subprocess.run(sample_input_cmd, shell=True, capture_output=True, text=True)
                 logging.info(f"Sample input:\n{result.stdout}")
                 
-                # フィルタリング条件を緩和してテスト
+                #フィルタリング条件を緩和してテスト
                 test_cmd = f"{samtools_view_cmd} | gawk '{{print $0}}' | head -n 10"
                 result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
                 logging.info(f"Test output without filtering:\n{result.stdout}")
         else:
             logging.error(f"{aligned_diff_chr} was not created")            
 
-        # Sort and index BAM file
+        #Sort and index BAM file
         logging.info("Sorting and indexing BAM file")
         if not run_command(f"samtools sort -@ {threads} {temp_folder}/{aligned_with_markers} > {folder_insertion}/{aligned_diff_chr_bam}"):
             logging.error("Failed to sort BAM file")
@@ -488,7 +502,7 @@ if args.start == "markers" or args.start == "all":
             logging.error("Failed to index BAM file")
             sys.exit(1)
 
-        # Create header from BAM file
+        #Create header from BAM file
         logging.info("Creating header from BAM file")
         if not run_command(f'samtools view -@ {threads} -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{header}'):
             logging.error("Failed to create header from BAM file")
@@ -505,36 +519,36 @@ if args.start == "readout" or args.start == "all":
     print("Starting readout processing")
     logging.info("Starting readout processing")
     
-    # Check if either untargeted or targeted is specified
+    #Check if either untargeted or targeted is specified
     if not (args.untargeted or args.targeted):
         logging.warning("Neither untargeted nor targeted markers specified. Skipping readout processing.")
         print("Neither untargeted nor targeted markers specified. Skipping readout processing.")
     else:
-        # Check if marker list file exists
+        #Check if marker list file exists
         if not check_file_exists(f'{temp_folder}/{marker_list_file}'):
             logging.error(f"Marker list file not found: {temp_folder}/{marker_list_file}")
             sys.exit(1)
 
-        # Read marker list
+        #Read marker list
         with open(f'{temp_folder}/{marker_list_file}') as f:
             marker_list = [i[1:].strip() for i in f if i.startswith('>')]
         logging.info(f"Processed {len(marker_list)} markers from marker list file")
         logging.info(f"Markers: {marker_list}")
 
-        # Check if aligned diff chr file exists
+        #Check if aligned diff chr file exists
         if not check_file_exists(f'{temp_folder}/{aligned_diff_chr}'):
             logging.error(f"Aligned diff chr file not found: {aligned_diff_chr}")
             sys.exit(1)
 
-        # Check file size
+        #Check file size
         file_size = os.path.getsize(f'{temp_folder}/{aligned_diff_chr}')
         logging.info(f"Aligned diff chr file size: {file_size} bytes")
 
         if file_size == 0:
-            logging.warning(f"Aligned diff chr file is empty: f'{temp_folder}/{aligned_diff_chr}'")
+            logging.warning(f"Aligned diff chr file is empty: {temp_folder}/{aligned_diff_chr}")
 
-        # Process data
-        logging.info(f"Grouping alignment data from file: f'{temp_folder}/{aligned_diff_chr}'")
+        #Process data
+        logging.info(f"Grouping alignment data from file: {temp_folder}/{aligned_diff_chr}'")
         data = group(f'{temp_folder}/{aligned_diff_chr}')
         
         if data is None:
@@ -557,7 +571,7 @@ if args.start == "readout" or args.start == "all":
                     logging.info("No insertions passed filtering and scoring")
 
                 logging.info("Generating readout")
-                # Note: filteredInsertions[0] (original_dict) is not used in the current implementation of readout function
+                #Note: filteredInsertions[0] (original_dict) is not used in the current implementation of readout function
                 success = readout(folder_insertion, filteredInsertions[1], marker_list, min_matches)
                 if not success:
                     logging.error("Failed to generate readout")
@@ -577,7 +591,7 @@ if args.start == "cnv" or args.start == "all":
         logging.error(f"Failed to create directory: {folder_cnv}")
         sys.exit(1)
 
-    # Check if BAM file exists
+    #Check if BAM file exists
     if not check_file_exists(f'{folder_insertion}/{aligned_diff_chr_bam}'):
         logging.error(f"BAM file not found: {folder_insertion}/{aligned_diff_chr_bam}")
         sys.exit(1)
@@ -626,7 +640,7 @@ if args.start == "plots" or args.start == "all":
         logging.error(f"Failed to create directory: {folder_cnv}")
         sys.exit(1)
         
-    # commands re-generation if not already defined
+    #commands re-generation if not already defined
     if 'exact_path' in locals() and exact_path is not None:
         try:
             logging.info("Regenerating commands in commandHandler")
@@ -638,7 +652,7 @@ if args.start == "plots" or args.start == "all":
         logging.info("exact_path is not defined or None. Setting commands to empty list.")
         commands = []
         
-    # marker_list re-generation if not already defined
+    #marker_list re-generation if not already defined
     try:
         logging.info("Regenerating marker list")
         with open(f'{temp_folder}/{marker_list_file}') as f:
@@ -649,7 +663,7 @@ if args.start == "plots" or args.start == "all":
         marker_list = []
         markers = ""
 
-    # header re-generation if not already defined
+    #header re-generation if not already defined
     header_file_name = f'{temp_folder}/temp_header.sam'
     if 'header' not in locals() or header is None:
         logging.warning("Warning: 'header' is not defined. Attempting to recreate it.")
@@ -659,18 +673,18 @@ if args.start == "plots" or args.start == "all":
                 raise Exception("Failed to retrieve header from BAM file")
             logging.info(f"Header successfully recreated and saved to {header_file_name}")
             
-            # ヘッダーの内容を確認
+            #ヘッダーの内容を確認
             with open(header_file_name, 'r') as f:
                 header_content = f.read()
             logging.info(f"Header content (first 200 characters): {header_content[:200]}")
             
-            header = header_file_name  # ヘッダーファイルの名前を保存
+            header = header_file_name  #ヘッダーファイルの名前を保存
         except Exception as header_error:
             logging.error(f"Error recreating header: {header_error}")
             logging.warning("Proceeding without header. This may cause issues in subsequent steps.")
             header = None
 
-    # bed_file execution
+    #bed_file execution
     try:
         print("Executing region_bed function")
         logging.info("Executing region_bed function")
@@ -692,18 +706,18 @@ if args.start == "plots" or args.start == "all":
         logging.error(f"Error in region_bed: {region_bed_error}")
         logging.warning("Failed to create bed file. This may affect subsequent steps.")
 
-    # Check if bed file was created
+    #Check if bed file was created
     if check_file_exists(f"{temp_folder}/{bed_file}"):
         logging.info(f"Bed file exists at: {temp_folder}/{bed_file}")
     else:
         logging.warning(f"Warning: Bed file not found at: {temp_folder}/{bed_file}")
         logging.warning("This may affect IGV screenshot generation.")
         
-    # Plotting Logic
+    #Plotting Logic
     if not args.manual_plots:
         logging.info("Generating IGV plots")
         if args.gtf is not None:
-            gtf = new_gtf_sorted  # don't put {folder_insertion} at the front
+            gtf = new_gtf_sorted  #don't put {folder_insertion} at the front
         else:
             gtf = None
         
@@ -718,11 +732,12 @@ if args.start == "plots" or args.start == "all":
             print(f"Error: Failed to generate IGV screenshots: {str(e)}")
             
     else:
-        logging.info("Generating manual plots")
+        logging.info("Generating depth statistics")
         if not run_command(f'samtools depth -b {bed_file} {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{overall_coverage}'):
             logging.error("Failed to generate coverage file")
             sys.exit(1)
         
+        logging.info("Generating histograms of depth")
         if not chrHistograms(f'{temp_folder}/{overall_coverage}', marker_list):
             logging.error("Failed to generate histograms")
             sys.exit(1)
@@ -749,7 +764,7 @@ if args.start == "kraken" or args.start == "all":
     if args.kraken:
         logging.info("Kraken analysis enabled")
 
-        # Check if input BAM file exists
+        #Check if input BAM file exists
         if not check_file_exists(f'{folder_insertion}/{aligned_diff_chr_bam}'):
             logging.error(f"Input BAM file not found: {folder_insertion}/{aligned_diff_chr_bam}")
             sys.exit(1)
@@ -770,7 +785,7 @@ if args.start == "kraken" or args.start == "all":
             logging.error("Kraken2 analysis failed")
             sys.exit(1)
 
-        # Check if Kraken2 output file exists
+        #Check if Kraken2 output file exists
         if not check_file_exists(f'{folder_kraken}/classified_seqs_{output_name}.kreport'):
             logging.error(f"Kraken2 output file not found: {folder_kraken}/classified_seqs_{output_name}.kreport")
             sys.exit(1)
@@ -781,7 +796,7 @@ if args.start == "kraken" or args.start == "all":
             logging.error("Bracken analysis failed")
             sys.exit(1)
 
-        # Check if Bracken output file exists
+        #Check if Bracken output file exists
         if not check_file_exists(f'{folder_kraken}/classified_seqs_{output_name}.bracken'):
             logging.error(f"Bracken output file not found: {folder_kraken}/classified_seqs_{output_name}.bracken")
             sys.exit(1)
@@ -806,11 +821,11 @@ if args.start == "variant" or args.start == "all":
     if args.variant_calling is not None and args.variant_calling != []:
         logging.info("Variant calling enabled")
 
-        # Set up variables for variant calling
+        #Set up variables for variant calling
         variant_genome_source_path = pathFinder(args.variant_calling[0])
         clinvardb_source_path = pathFinder(args.variant_calling[1])
 
-        # Check if input files exist
+        #Check if input files exist
         if not check_file_exists(variant_genome_source_path):
             logging.error(f"Variant genome file not found: {variant_genome_source_path}")
             sys.exit(1)
@@ -818,7 +833,7 @@ if args.start == "variant" or args.start == "all":
             logging.error(f"ClinVar database file not found: {clinvardb_source_path}")
             sys.exit(1)
 
-        # Check and create BWA index
+        #Check and create BWA index
         bwa_index_files = [".bwt", ".pac", ".sa", ".ann", ".amb"]
         if all(os.path.isfile(variant_genome_source_path + ext) for ext in bwa_index_files):
             logging.info("BWA index files detected. Skipping BWA indexing.")
@@ -828,7 +843,7 @@ if args.start == "variant" or args.start == "all":
                 logging.error("BWA indexing failed")
                 sys.exit(1)
 
-        # Check and create samtools faidx
+        #Check and create samtools faidx
         if os.path.isfile(variant_genome_source_path + ".fai"):
             logging.info("Samtools faidx index detected. Skipping samtools faidx.")
         else:
@@ -837,7 +852,7 @@ if args.start == "variant" or args.start == "all":
                 logging.error("Samtools faidx indexing failed")
                 sys.exit(1)
 
-        # Realign reads to the new genome
+        #Realign reads to the new genome
         print("Realigning reads to GRCh38")
         logging.info("Realigning reads to GRCh38")
         bwa_cmd = f"bwa mem -M -t {threads} {variant_genome_source_path} {reads_1_path} {reads_2_path} > {temp_folder}/{variant_genome_aligned}"
@@ -845,7 +860,7 @@ if args.start == "variant" or args.start == "all":
             logging.error("BWA alignment failed")
             sys.exit(1)
 
-        # Sort and index the aligned BAM file
+        #Sort and index the aligned BAM file
         print("Sorting and indexing the aligned BAM file")
         logging.info("Sorting and indexing the aligned BAM file")
         if not run_command(f"samtools sort -@ {threads} {temp_folder}/{variant_genome_aligned} > {temp_folder}/{variant_genome_aligned_bam}"):
@@ -855,7 +870,7 @@ if args.start == "variant" or args.start == "all":
             logging.error("Samtools index failed")
             sys.exit(1)
 
-        # Generate VCF using bcftools
+        #Generate VCF using bcftools
         print("Generating VCF using bcftools")
         logging.info("Generating VCF using bcftools")
         bcftools_cmd = f"bcftools mpileup -Ou -f {variant_genome_source_path} {temp_folder}/{variant_genome_aligned_bam} | bcftools call -mv -Ov -o {temp_folder}/{variant_vcf}"
@@ -863,7 +878,7 @@ if args.start == "variant" or args.start == "all":
             logging.error("BCFtools variant calling failed")
             sys.exit(1)
 
-        # Check if VCF file was created
+        #Check if VCF file was created
         if not check_file_exists(f"{temp_folder}/{variant_vcf}"):
             logging.error(f"VCF file not found: {temp_folder}/{variant_vcf}")
             sys.exit(1)
@@ -885,7 +900,7 @@ if args.start == "snp_filtering" or args.start == "all":
         variant_genome_source_path = pathFinder(args.variant_calling[0])
         clinvardb_source_path = pathFinder(args.variant_calling[1])
 
-        # Check if input files exist
+        #Check if input files exist
         if not check_file_exists(f"{temp_folder}/{variant_vcf}"):
             logging.error(f"Input VCF file not found: {temp_folder}/{variant_vcf}")
             sys.exit(1)
@@ -893,7 +908,7 @@ if args.start == "snp_filtering" or args.start == "all":
             logging.error(f"ClinVar database file not found: {clinvardb_source_path}")
             sys.exit(1)
 
-        # Run snpEff
+        #Run snpEff
         print("Running snpEff for variant annotation")
         logging.info("Running snpEff for variant annotation")
         snpeff_cmd = f"snpEff -dataDir seqverify_defaults -v GRCh38.105 -stats {temp_folder}/snpeff_summary.html -csvStats {temp_folder}/snpeff_summary.csv {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}"
@@ -901,24 +916,24 @@ if args.start == "snp_filtering" or args.start == "all":
             logging.error("snpEff annotation failed")
             sys.exit(1)
 
-        # Check if snpEff output file was created
+        #Check if snpEff output file was created
         if not check_file_exists(f"{temp_folder}/{variant_vcf_ann}"):
             logging.error(f"snpEff output file not found: {temp_folder}/{variant_vcf_ann}")
             sys.exit(1)
 
-        # Run SnpSift
+        #Run SnpSift
         logging.info("Running SnpSift for ClinVar annotation")
         snpsift_cmd = f"SnpSift annotate -v {clinvardb_source_path} {temp_folder}/{variant_vcf_ann} > {folder_snp}/{variant_vcf_ann}"
         if not run_command(snpsift_cmd):
             logging.error("SnpSift annotation failed")
             sys.exit(1)
 
-        # Check if SnpSift output file was created
+        #Check if SnpSift output file was created
         if not check_file_exists(f"{folder_snp}/{variant_vcf_ann}"):
             logging.error(f"SnpSift output file not found: {folder_snp}/{variant_vcf_ann}")
             sys.exit(1)
 
-        # Run mutation logger
+        #Run mutation logger
         logging.info("Running mutation logger for final filtering")
         try:
             if exact_path is None:
@@ -929,7 +944,7 @@ if args.start == "snp_filtering" or args.start == "all":
             logging.error(f"Mutation logger failed: {e}")
             sys.exit(1)
 
-        # Check if mutation logger output file was created
+        #Check if mutation logger output file was created
         if not check_file_exists(f"{folder_snp}/{variant_lof}"):
             logging.error(f"Mutation logger output file not found: {folder_snp}/{variant_lof}")
             sys.exit(1)
@@ -939,7 +954,7 @@ if args.start == "snp_filtering" or args.start == "all":
     else:
         logging.info("Variant calling was not enabled, skipping SNP filtering")
 
-# Temporary folder cleanup
+#Temporary folder cleanup
 if args.keep_temp:
     logging.info(f"Keeping temporary folder: {temp_folder}")
 else:

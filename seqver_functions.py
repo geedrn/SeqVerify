@@ -95,7 +95,7 @@ class SamAlignment:
         self.QNAME = fields[0] 
         self.FLAG = fields[1] 
         self.RNAME = fields[2] 
-        self.POS = fields[3]
+        self.POS = int(fields[3])  # Convert to int for easier processing
         self.MAPQ = fields[4]
         self.CIGAR = fields[5]
         self.RNEXT = fields[6]
@@ -110,6 +110,38 @@ class SamAlignment:
 
     def __str__(self): #making an alignment into a string returns the original line from the sam file
         return self.ALIGNMENT
+
+    def parse_xa_tag(self):
+        xa_tag = self.optionalTag("XA")
+        if xa_tag is None:
+            return []
+        alignments = []
+        for alignment in xa_tag[2].split(';'):
+            if alignment:
+                chrom, pos, cigar, nm = alignment.split(',')
+                alignments.append([chrom, int(pos)])
+        return alignments
+
+    def parse_sa_tag(self):
+        sa_tag = self.optionalTag("SA")
+        if sa_tag is None:
+            return []
+        alignments = []
+        for alignment in sa_tag[2].split(';'):
+            if alignment:
+                chrom, pos, strand, cigar, mapq, nm = alignment.split(',')
+                alignments.append([chrom, int(pos)])
+        return alignments
+
+    def allPositions(self, tag_list=['SA', 'XA']):
+        positions = [[self.RNAME, self.POS]]  # Primary alignment
+        if self.RNEXT != '=' and self.RNEXT != '*':
+            positions.append([self.RNEXT, int(self.PNEXT)])  # Mate alignment
+        if 'XA' in tag_list:
+            positions.extend(self.parse_xa_tag())
+        if 'SA' in tag_list:
+            positions.extend(self.parse_sa_tag())
+        return positions
 
     def optionalTag(self,tag_code): #finds optional tag (if it exists, otherwise returns None) and separates it into [TAG,TYPE,VALUE] as determined in the SAM manual
         if self.OPTIONAL == None:
@@ -181,6 +213,8 @@ class SamAlignment:
         return required_positions
 
 def group(samfile): #returns a dictionary containing all reference transgene chromosomes. each of those then contains another dictionary containing all the chromosomes that got mapped to, and each of those contains a dictionary containing the position of the mappings and how many times they were mapped to it.
+    print("Grouping reads by chromosome")
+    logging.info("Grouping reads by chromosome")
     alignments = {}
     try:  # Change: Wrap file operations in a try block
         with open(samfile) as sam:
@@ -190,28 +224,32 @@ def group(samfile): #returns a dictionary containing all reference transgene chr
                 alignment = SamAlignment(alignment) #uses our SamAlignment class for ease of use
                 matches = alignment.allPositions(tag_list=supp_tags) #finds all supplementary alignments in the read
                 ref_chromosome = matches[0][0] #takes name of ref chromosome
-                mates_and_supplementaries = matches[1:] #takes positions of all matches and excludes the original read (we don't care where the read maps to on the original chromosome)
-                try: #dictionary logic
-                    chromosome_dict = alignments[ref_chromosome] #initializes chromosome_dict to the reference chromosome entry, if it exists
-                    for position in mates_and_supplementaries:
-                        aligned_chrm_name = position[0]
-                        try:
-                            try:
-                                chromosome_dict[aligned_chrm_name][position[1]] += 1 
-                            except:
-                                chromosome_dict[aligned_chrm_name][position[1]] = 1 
-                        except KeyError:
-                            chromosome_dict[aligned_chrm_name] = {position[1]:1} 
-                except KeyError:
+                all_positions = matches #includes all positions, including the primary alignment
+                
+                # Debug: Print information about each alignment
+                print(f"Debug: Processing alignment - Ref Chromosome: {ref_chromosome}, Matches: {matches}")
+                
+                if ref_chromosome not in alignments:
                     alignments[ref_chromosome] = {} #if the reference chromosome hasn't been seen yet, creates a new entry
-                    new_chromosomes = list(set([position[0] for position in mates_and_supplementaries])) #adds all the new chromosomes that have reads aligned to the reference chromosome in this alignment
-                    for chromosome in new_chromosomes: #initializes all of them to be empty
-                        alignments[ref_chromosome][chromosome] = {}
-                    for position in mates_and_supplementaries: #if there is no dict for the chromosome the sequence aligns to, it creates one. this for loop is necessary as to not discard the information in that alignment
-                        try:
-                            alignments[ref_chromosome][position[0]][position[1]] += 1 
-                        except:
-                            alignments[ref_chromosome][position[0]][position[1]] = 1
+                
+                for position in all_positions:
+                    aligned_chrm_name, site = position
+                    if aligned_chrm_name not in alignments[ref_chromosome]:
+                        alignments[ref_chromosome][aligned_chrm_name] = {}
+                    
+                    if site not in alignments[ref_chromosome][aligned_chrm_name]:
+                        alignments[ref_chromosome][aligned_chrm_name][site] = [0, 0]
+                    
+                    # Determine if the alignment is chimeric
+                    is_chimeric = aligned_chrm_name != ref_chromosome
+                    if is_chimeric:
+                        alignments[ref_chromosome][aligned_chrm_name][site][1] += 1
+                    else:
+                        alignments[ref_chromosome][aligned_chrm_name][site][0] += 1
+                
+                # Debug: Print current state of alignments after processing each read
+                print(f"Debug: Current alignments state: {alignments}")
+                
     except FileNotFoundError:  # Change: Add error handling for file not found
         print(f"Error: The SAM file '{samfile}' was not found.")
         return None
@@ -221,22 +259,30 @@ def group(samfile): #returns a dictionary containing all reference transgene chr
         print("Warning: No alignments found. This might indicate no mapping to sequences.")
         return None
 
+    # Debug: Print final state before processing chimeric reads
+    print("Debug: Final state before processing chimeric reads:")
+    print(alignments)
+
+    # This loop is no longer necessary as we're processing chimeric reads in the main loop
+    # But we keep it for consistency with the original output format
     for ref_chromosome, aligned in alignments.items():
         for aligned_chromosome, alignment_data in aligned.items():
             for site in alignment_data.keys():
-                matches = alignments[ref_chromosome][aligned_chromosome][site]
-                chimeric = str(site)[0] == "-"
-                if chimeric:
-                    alignments[ref_chromosome][aligned_chromosome][site] = [0, matches]
-                if not chimeric:
-                    alignments[ref_chromosome][aligned_chromosome][site] = [matches, 0]
+                # Debug: Print each site after processing
+                print(f"Debug: Processed site - Ref: {ref_chromosome}, Aligned: {aligned_chromosome}, Site: {site}, Result: {alignments[ref_chromosome][aligned_chromosome][site]}")
+
     print(alignments)
-    print("done with grouping")
+    print("Grouping complete")
     return alignments
 
 def compress(alignment_dict, granularity=500): #compresses the alignments to the desired granularity
-    print("reached read aggregation")
+    print("Compressing reads")
+    logging.info("Compressing reads")
     readout_dict = {} #initializes final dictionary as empty
+    
+    # Debug: Print input alignment_dict
+    print(f"Debug: Input alignment_dict: {alignment_dict}")
+    
     for reference_chromosome, alignments in alignment_dict.items():
         readout_dict[reference_chromosome] = {}
         for aligned_chromosome, alignment_data in alignments.items():
@@ -256,11 +302,21 @@ def compress(alignment_dict, granularity=500): #compresses the alignments to the
                         if abs(possible_location - location) < granularity: #if the point is at least close enough to one point to be put in its bin, finds which point it is and adds it to it.
                             matches = readout_dict[reference_chromosome][aligned_chromosome][possible_location]
                             readout_dict[reference_chromosome][aligned_chromosome][possible_location] = [sum(x) for x in zip(matches, repetitions)] #repetitions
+                
+                # Debug: Print current state of readout_dict after processing each location
+                print(f"Debug: Current readout_dict state for {reference_chromosome}, {aligned_chromosome}, {location}: {readout_dict[reference_chromosome][aligned_chromosome]}")
+    
+    # Debug: Print state of readout_dict before processing chimeric sites
+    print(f"Debug: readout_dict before processing chimeric sites: {readout_dict}")
     
     final_readout_dict = deepcopy(readout_dict)
     for reference_chromosome, alignments in readout_dict.items():
         for aligned_chromosome, alignment_data in alignments.items():
             chimeric_sites = [site for site in alignment_data.keys() if str(site)[0] == "-"]
+            
+            # Debug: Print chimeric sites found
+            print(f"Debug: Chimeric sites found for {reference_chromosome}, {aligned_chromosome}: {chimeric_sites}")
+            
             for chimeric_site in chimeric_sites:
                 locations = list(final_readout_dict[reference_chromosome][aligned_chromosome].keys())
                 repetitions = list(final_readout_dict[reference_chromosome][aligned_chromosome].values())
@@ -268,21 +324,32 @@ def compress(alignment_dict, granularity=500): #compresses the alignments to the
                 close_locations_indices = [index for index, location in enumerate(locations) if abs(chimeric_site_positive_coordinates - location) <= granularity and int(location) >= 0]
                 
                 total_reads = final_readout_dict[reference_chromosome][aligned_chromosome][chimeric_site]
-                print(f"DEBUG DELETING chimeric site {chimeric_site}")
+                print(f"Debug: deleting chimeric site {chimeric_site}")
                 del final_readout_dict[reference_chromosome][aligned_chromosome][chimeric_site]
                 for index in close_locations_indices:
                     location_at_index, repetitions_at_index = locations[index], repetitions[index]
                     total_reads = [sum(x) for x in zip(total_reads,repetitions_at_index)]
-                    print(f"DEBUG DELETING nonchimeric location {location_at_index}")
+                    print(f"Debug: deleting nonchimeric location {location_at_index}")
                     del final_readout_dict[reference_chromosome][aligned_chromosome][location_at_index]
 
                 final_readout_dict[reference_chromosome][aligned_chromosome][chimeric_site_positive_coordinates] = total_reads
                 
-    print("done with read aggregation")
+                # Debug: Print state after processing each chimeric site
+                print(f"Debug: State after processing chimeric site {chimeric_site}: {final_readout_dict[reference_chromosome][aligned_chromosome]}")
+
+    # Debug: Print final state of final_readout_dict
+    print(f"Debug: Final state of final_readout_dict: {final_readout_dict}")
+    
+    print("Compression complete")
     return final_readout_dict
 
 def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, threshold_probability, stringency):
     print("reached filtering")
+    
+    # Debug: Print input parameters
+    print(f"Debug: Input parameters - threshold_probability: {threshold_probability}, stringency: {stringency}")
+    print(f"Debug: Input readout_dict: {readout_dict}")
+    
     run_command(f'samtools depth {folder_insertion}/{bam_file} > {temp_folder}/total_coverage.cov', shell=True)
     
     total_cov, length = 0, 0
@@ -303,6 +370,9 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
         spurious_threshold = poisson.ppf(float(1 - threshold_probability), read_depth)
         print(f"spurious threshold is {spurious_threshold}, proceeding to scoring...")
 
+        # Debug: Print initial state of editable_readout
+        print(f"Debug: Initial state of editable_readout: {editable_readout}")
+
         with open(f"{temp_folder}/confidence.bed", "w+") as bed:
             for read_chromosome, alignments in readout_dict.items():
                 for alignment_chromosome, sites in alignments.items():
@@ -316,6 +386,9 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
                             editable_readout[read_chromosome][alignment_chromosome][site].append(ratio)
                         except ZeroDivisionError:
                             editable_readout[read_chromosome][alignment_chromosome][site].append("inf")
+                        
+                        # Debug: Print each site's score
+                        print(f"Debug: Score for {read_chromosome}, {alignment_chromosome}, {site}: {editable_readout[read_chromosome][alignment_chromosome][site][-1]}")
 
         print("confidence score calculated, moving to coverage mapping...")
         run_command(f'samtools depth -b {temp_folder}/confidence.bed {folder_insertion}/{bam_file} > {temp_folder}/confidence.cov', shell=True)
@@ -327,6 +400,9 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
                 if int(fields[2]) >= spurious_threshold:
                     to_delete.append((fields[0], fields[1]))
 
+        # Debug: Print sites to be deleted
+        print(f"Debug: Sites to be deleted due to high coverage: {to_delete}")
+
         print("coverage mapping complete, moving to pruning high-coverage areas...")
         for read_chromosome, alignments in readout_dict.items():
             for alignment_chromosome, sites in alignments.items():
@@ -336,6 +412,9 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
                         print(f"pruning the site aligned to the {alignment_chromosome} untargeted edit and {read_chromosome} on the genome at coordinate {site}")
                         del editable_readout[read_chromosome][alignment_chromosome][site]
 
+        # Debug: Print final state of editable_readout
+        print(f"Debug: Final state of editable_readout: {editable_readout}")
+
         print("filtering complete")
         return [readout_dict, editable_readout]
 
@@ -344,8 +423,8 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
         return readout_dict, readout_dict
 
 def readout(folder, insertion_dict, chr_filter, min_matches=1):
-    # original_dict parameter removed as it's not used in the current implementation
-    print("reached printing")
+    #original_dict parameter removed as it is not used in the current implementation
+    print("Readoout generation")
     logging.info("Starting readout generation")
     
     try:
