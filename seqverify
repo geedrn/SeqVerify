@@ -838,13 +838,15 @@ if args.start == "variant" or args.start == "all":
                 sys.exit(1)
 
         # Realign reads to the new genome
-        logging.info("Realigning reads to the variant genome")
+        print("Realigning reads to GRCh38")
+        logging.info("Realigning reads to GRCh38")
         bwa_cmd = f"bwa mem -M -t {threads} {variant_genome_source_path} {reads_1_path} {reads_2_path} > {temp_folder}/{variant_genome_aligned}"
         if not run_command(bwa_cmd):
             logging.error("BWA alignment failed")
             sys.exit(1)
 
         # Sort and index the aligned BAM file
+        print("Sorting and indexing the aligned BAM file")
         logging.info("Sorting and indexing the aligned BAM file")
         if not run_command(f"samtools sort -@ {threads} {temp_folder}/{variant_genome_aligned} > {temp_folder}/{variant_genome_aligned_bam}"):
             logging.error("Samtools sort failed")
@@ -854,6 +856,7 @@ if args.start == "variant" or args.start == "all":
             sys.exit(1)
 
         # Generate VCF using bcftools
+        print("Generating VCF using bcftools")
         logging.info("Generating VCF using bcftools")
         bcftools_cmd = f"bcftools mpileup -Ou -f {variant_genome_source_path} {temp_folder}/{variant_genome_aligned_bam} | bcftools call -mv -Ov -o {temp_folder}/{variant_vcf}"
         if not run_command(bcftools_cmd):
@@ -865,6 +868,7 @@ if args.start == "variant" or args.start == "all":
             logging.error(f"VCF file not found: {temp_folder}/{variant_vcf}")
             sys.exit(1)
 
+        print("Variant calling completed successfully")
         logging.info("Variant calling completed successfully")
 
         if args.keepgoing:
@@ -874,6 +878,7 @@ if args.start == "variant" or args.start == "all":
         logging.info("Variant calling not enabled, skipping")
         
 if args.start == "snp_filtering" or args.start == "all":
+    print("Starting SNP filtering")
     logging.info("Starting SNP filtering")
 
     if args.variant_calling is not None and args.variant_calling != []:
@@ -889,8 +894,9 @@ if args.start == "snp_filtering" or args.start == "all":
             sys.exit(1)
 
         # Run snpEff
+        print("Running snpEff for variant annotation")
         logging.info("Running snpEff for variant annotation")
-        snpeff_cmd = f"snpEff -dataDir seqverify_defaults -v GRCh38.105 {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}"
+        snpeff_cmd = f"snpEff -dataDir seqverify_defaults -v GRCh38.105 -stats {temp_folder}/snpeff_summary.html -csvStats {temp_folder}/snpeff_summary.csv {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}"
         if not run_command(snpeff_cmd):
             logging.error("snpEff annotation failed")
             sys.exit(1)
@@ -928,6 +934,7 @@ if args.start == "snp_filtering" or args.start == "all":
             logging.error(f"Mutation logger output file not found: {folder_snp}/{variant_lof}")
             sys.exit(1)
 
+        print("SNP filtering completed successfully")
         logging.info("SNP filtering completed successfully")
     else:
         logging.info("Variant calling was not enabled, skipping SNP filtering")
@@ -947,4 +954,5 @@ else:
         print(f"Warning: Failed to remove temporary folder: {e}")
         logging.info(f"You may need to manually remove the temporary folder: {temp_folder}")
 
+print("SeqVerify pipeline completed")
 logging.info("SeqVerify pipeline completed")
