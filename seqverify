@@ -252,6 +252,9 @@ base_block = max_mem / 8
 os.environ['_JAVA_OPTIONS'] = '-Xmx'+args.max_mem
 run_command('echo $_JAVA_OPTIONS')
 
+logging.info(f"Number of threads: {threads}")
+logging.info(f"Max memory: {max_mem / (1024 * 1024 * 1024):.2f} GB")
+
 if args.start == "beginning" or args.start == "all":
     #Preliminary Work - Generates the output folders given a specified --output string as well as the temp folder for the pipeline to work within
     run_command(f'mkdir -p {folder_insertion}')
@@ -394,8 +397,6 @@ if args.start == "markers" or args.start == "all":
                 print(f"Processing marker: {marker}")
                 logging.info(f"Processing marker: {marker}")
                 logging.info(f"Processing file: {aligned_with_markers}")
-                logging.info(f"Number of processes: {threads}")
-                logging.info(f"Max memory per process: {max_mem / (1024 * 1024 * 1024):.2f} GB")
                 #parameters: input_file, output_file, markers, num_threads, max_mem_per_process
                 #process_file is made upon the pysam library
                 total_counts = process_file(f"{temp_folder}/{aligned_with_markers}", f"{temp_folder}/{aligned_diff_chr}", marker, threads, max_mem)
