@@ -13,8 +13,6 @@ import os
 import resource
 import traceback
 
-supp_tags = ['SA','XA'] #sets the two possible optional alignments, chimeric and split respectively
-
 def check_file_exists(file_path):
     '''
     Check if a file exists at the specified path
