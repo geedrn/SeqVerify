@@ -11,7 +11,6 @@ from seqver_genomeupdate import *
 from seqver_lofFinder import *
 from seqver_gtf import *
 import logging
-import pysam
 
 parser = argparse.ArgumentParser()
 
@@ -329,8 +328,6 @@ if args.start == "beginning" or args.start == "all":
     #Builds the indices for the genome that has now been augmented with the transgenes, necessary for alignment
     logging.info(f"Building BWA index for: {temp_folder}/{genome_with_markers}")
     run_command(f'bwa index -b {base_block} {temp_folder}/{genome_with_markers}')
-
-    logging.info(f"Copying augmented genome to: {folder_insertion}/{genome_with_markers}")
     run_command(f'cp {temp_folder}/{genome_with_markers} {folder_insertion}/{genome_with_markers}')
 
     if args.keepgoing:
@@ -393,8 +390,9 @@ if args.start == "markers" or args.start == "all":
                 logging.info(f"Processing file: {aligned_with_markers}")
                 logging.info(f"Number of processes: {threads}")
                 logging.info(f"Max memory per process: {max_mem / (1024 * 1024 * 1024):.2f} GB")
-
-                total_counts = process_file(aligned_with_markers, aligned_diff_chr, threads, max_mem)
+                #parameters: input_file, output_file, markers, num_threads, max_mem_per_process
+                #process_file is made upon the pysam library
+                total_counts = process_file(f"{temp_folder}/{aligned_with_markers}", f"{temp_folder}/{aligned_diff_chr}", marker, threads, max_mem)
 
             except Exception as e:
                 logging.error(f"Failed to process alignments for marker {marker}: {str(e)}")

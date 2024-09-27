@@ -9,10 +9,9 @@ import logging
 import shlex
 import pysam
 import logging
-import multiprocessing
 import os
-from functools import partial
 import resource
+import traceback
 
 supp_tags = ['SA','XA'] #sets the two possible optional alignments, chimeric and split respectively
 
@@ -532,36 +531,31 @@ def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
     run_command(f"bcftools isec -p {temp_folder}/dir {temp_folder}/{vcf_1}.gz {temp_folder}/{vcf_2}.gz", shell=True)
     run_command(f"mv {temp_folder}/dir/0001.vcf {folder}/{isec}", shell=True)
 
-def process_chunk(input_file, output_file, markers, start, end, max_chunk_size, max_mem):
+def process_file(input_file, output_file, markers, threads, max_mem):
     resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
+    
     chunk_counts = {
         'case1': 0,
         'case2_soft_clip': 0,
         'case2_supplementary': 0
     }
     
-    with pysam.AlignmentFile(input_file, "rb") as infile, \
-         pysam.AlignmentFile(output_file, "wb", template=infile) as outfile:
-        
-        infile.seek(start)
-        current_pos = start
-        while current_pos < end:
-            chunk_end = min(current_pos + max_chunk_size, end)
+    try:
+        with pysam.AlignmentFile(input_file, "r") as infile, \
+             pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
             
-            def read_generator():
-                while infile.tell() < chunk_end:
-                    try:
-                        yield next(infile)
-                    except StopIteration:
-                        break
-
-            for read in read_generator():
+            for read in infile:
+                if read.reference_name is None:
+                    continue
+                
                 if read.reference_name in markers:
                     #case1: either read is mapped to a marker and its mate is not
-                    is_case1 = read.next_reference_name not in markers and read.next_reference_name != '='
+                    is_case1 = (read.next_reference_name not in markers) and (read.next_reference_name != '=')
                     #case2: either read is soft-clipped
                     #soft-clipped means the read is not fully mapped to the reference genome
-                    is_case2_soft_clip = read.cigar is not None and (read.cigar[0][0] == 4 or read.cigar[-1][0] == 4)
+                    is_case2_soft_clip = False
+                    if read.cigar:
+                        is_case2_soft_clip = (read.cigar[0][0] == 4 or read.cigar[-1][0] == 4)
                     #case3: either read is supplementary
                     #supplementary means the reads can be mapped to multiple locations
                     is_case2_supplementary = read.flag & 2048 != 0
@@ -576,24 +570,10 @@ def process_chunk(input_file, output_file, markers, start, end, max_chunk_size, 
                         outfile.write(read)
                         chunk_counts['case2_supplementary'] += 1
 
-            current_pos = chunk_end
+    except Exception as e:
+        logging.error(f"Critical error processing file: {str(e)}")
+        logging.error(f"Error details: {traceback.format_exc()}")
+        logging.error(f"Error occurred at read: {read.to_string()}")
+        sys.exit(1)
 
     return chunk_counts
-
-def process_file(input_file, output_file, markers, num_threads, max_mem_per_process):
-    file_size = os.path.getsize(input_file)
-    chunk_size = file_size // num_threads
-    max_chunk_size = 1024 * 1024 * 100  #Max 100MB per chunk
-
-    pool = multiprocessing.Pool(processes=num_threads)
-    process_func = partial(process_chunk, input_file, output_file, markers, max_chunk_size=max_chunk_size, max_mem=max_mem_per_process)
-
-    chunks = [(i * chunk_size, (i + 1) * chunk_size) for i in range(num_threads)]
-    chunks[-1] = (chunks[-1][0], file_size)  #Last chunk goes to the end of the file
-
-    results = pool.starmap(process_func, chunks)
-    pool.close()
-    pool.join()
-
-    total_counts = {key: sum(result[key] for result in results) for key in results[0]}
-    return total_counts
