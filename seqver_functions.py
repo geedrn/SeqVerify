@@ -615,6 +615,14 @@ def process_file(input_file, output_file, markers, threads, max_mem):
                     elif is_case3_supplementary:
                         chunk_counts['case3_supplementary'] += 1
 
+            # Report the number of reads in each category
+            print(f"Case 1: {chunk_counts['case1']}")
+            logging.info(f"Case 1: {chunk_counts['case1']}")
+            print(f"Case 2 (Soft Clip): {chunk_counts['case2_soft_clip']}")
+            logging.info(f"Case 2 (Soft Clip): {chunk_counts['case2_soft_clip']}")
+            print(f"Case 3 (Supplementary): {chunk_counts['case3_supplementary']}")
+            logging.info(f"Case 3 (Supplementary): {chunk_counts['case3_supplementary']}")
+            
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
         logging.error(f"Error details: {traceback.format_exc()}")
