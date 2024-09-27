@@ -537,9 +537,55 @@ def process_file(input_file, output_file, markers, threads, max_mem):
     chunk_counts = {
         'case1': 0,
         'case2_soft_clip': 0,
-        'case2_supplementary': 0
+        'case3_supplementary': 0
     }
     
+    def is_significant_soft_clip(read, min_clip_length=20):
+        if not read.cigar:
+            return False
+        
+        left_clip = read.cigar[0][1] if read.cigar[0][0] == 4 else 0
+        right_clip = read.cigar[-1][1] if read.cigar[-1][0] == 4 else 0
+        
+        return (left_clip >= min_clip_length or right_clip >= min_clip_length) and read.mapping_quality >= 20
+
+    def is_case2_soft_clip(read):
+        if not is_significant_soft_clip(read):
+            return False
+        
+        # Get the sequence of the soft-clipped part
+        if read.cigar[0][0] == 4:  # Left-side soft clip
+            clipped_seq = read.query_sequence[:read.cigar[0][1]]
+        elif read.cigar[-1][0] == 4:  # Right-side soft clip
+            clipped_seq = read.query_sequence[-read.cigar[-1][1]:]
+        else:
+            return False
+        
+        # Check if the soft-clipped sequence matches with any marker sequence
+        for marker in markers:
+            if clipped_seq in marker or marker in clipped_seq:
+                return True
+        
+        return False
+
+    def is_case3_supplementary(read):
+        # Check if the read is supplementary
+        is_supplementary = read.flag & 2048 != 0
+        
+        if not is_supplementary:
+            return False
+        
+        # Check if any of the alternative mappings are to a marker
+        for tag in read.get_tags():
+            if tag[0] == 'SA':  # SA tag contains supplementary alignment information
+                supplementary_alignments = tag[1].split(';')
+                for aln in supplementary_alignments:
+                    aln_parts = aln.split(',')
+                    if aln_parts[0] in markers:  # Check if the reference name is a marker
+                        return True
+        
+        return False
+
     try:
         with pysam.AlignmentFile(input_file, "r") as infile, \
              pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
@@ -548,27 +594,42 @@ def process_file(input_file, output_file, markers, threads, max_mem):
                 if read.reference_name is None:
                     continue
                 
-                if read.reference_name in markers:
-                    #case1: either read is mapped to a marker and its mate is not
-                    is_case1 = (read.next_reference_name not in markers) and (read.next_reference_name != '=')
-                    #case2: either read is soft-clipped
-                    #soft-clipped means the read is not fully mapped to the reference genome
-                    is_case2_soft_clip = False
-                    if read.cigar:
-                        is_case2_soft_clip = (read.cigar[0][0] == 4 or read.cigar[-1][0] == 4)
-                    #case3: either read is supplementary
-                    #supplementary means the reads can be mapped to multiple locations
-                    is_case2_supplementary = read.flag & 2048 != 0
+                is_marker_read = read.reference_name in markers
+                is_mate_marker_read = read.next_reference_name in markers
 
+                # Case 1: either read is mapped to a marker and its mate is not, or vice versa
+                is_case1 = (is_marker_read and not is_mate_marker_read) or (not is_marker_read and is_mate_marker_read)
+                
+                # Case 2: read is soft-clipped and the clipped part matches a marker
+                is_case2_soft_clip = is_case2_soft_clip(read)
+                
+                # Case 3: read is supplementary and one of its alternative mappings is to a marker
+                is_case3_supplementary = is_case3_supplementary(read)
+
+                if is_case1 or is_case2_soft_clip or is_case3_supplementary:
+                    outfile.write(read)
                     if is_case1:
-                        outfile.write(read)
                         chunk_counts['case1'] += 1
                     elif is_case2_soft_clip:
-                        outfile.write(read)
                         chunk_counts['case2_soft_clip'] += 1
-                    elif is_case2_supplementary:
-                        outfile.write(read)
-                        chunk_counts['case2_supplementary'] += 1
+                    elif is_case3_supplementary:
+                        chunk_counts['case3_supplementary'] += 1
+
+                # Process the mate if it's available
+                if read.is_paired and not read.mate_is_unmapped:
+                    mate = infile.mate(read)
+                    is_mate_marker_read = mate.reference_name in markers
+                    is_mate_case2 = is_case2_soft_clip(mate)
+                    is_mate_case3 = is_case3_supplementary(mate)
+
+                    if is_case1 or is_mate_case2 or is_mate_case3:
+                        outfile.write(mate)
+                        if is_case1:
+                            chunk_counts['case1'] += 1
+                        elif is_mate_case2:
+                            chunk_counts['case2_soft_clip'] += 1
+                        elif is_mate_case3:
+                            chunk_counts['case3_supplementary'] += 1
 
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
