@@ -565,39 +565,58 @@ def process_file(input_file, output_file, markers, threads, max_mem):
         with pysam.AlignmentFile(input_file, "r") as infile, \
              pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
             
+            # Dictionary to store reads waiting for their mate
+            waiting_reads = {}
+            
             for read in infile:
-                if read.reference_name is None:
+                if read.is_unmapped or read.mate_is_unmapped:
                     continue
+                
+                # Generate a unique key for the read pair
+                pair_key = (read.query_name, read.reference_name, read.next_reference_name)
                 
                 is_marker_read = read.reference_name in markers
                 is_mate_marker_read = read.next_reference_name in markers
-
-                # Case 1: either read is mapped to a marker and its mate is not, or vice versa
                 is_case1 = (is_marker_read and not is_mate_marker_read) or (not is_marker_read and is_mate_marker_read)
-                
-                # Check for chimeric or split alignments
                 is_case2 = check_chimeric_and_split_alignments(read, markers)
-
-                if is_case1 and is_case2:
+                
+                if pair_key in waiting_reads:
+                    # We have both reads of the pair now
+                    mate = waiting_reads.pop(pair_key)
+                    
+                    # Determine the case for the pair
+                    if (is_case1 and is_case2) or (mate[1] and mate[2]):
+                        chunk_counts['case3'] += 1
+                        case = 'case3'
+                    elif is_case1 or mate[1]:
+                        chunk_counts['case1'] += 1
+                        case = 'case1'
+                    elif is_case2 or mate[2]:
+                        chunk_counts['case2'] += 1
+                        case = 'case2'
+                    else:
+                        continue  # Neither read in the pair meets any condition
+                    
+                    # Write both reads
+                    outfile.write(mate[0])
                     outfile.write(read)
-                    chunk_counts['case3'] += 1
-                    logging.debug(f"Case 3 found: Read ID: {read.query_name}")
-                elif is_case1:
-                    outfile.write(read)
-                    chunk_counts['case1'] += 1
-                    logging.debug(f"Case 1 found: Read ID: {read.query_name}")
-                elif is_case2:
-                    outfile.write(read)
-                    chunk_counts['case2'] += 1
-                    logging.debug(f"Case 2 found: Read ID: {read.query_name}")
-
-            print(f"Chunk counts: {chunk_counts}")
-            logging.info(f"Chunk counts: {chunk_counts}")
-
+                    logging.debug(f"{case} found: Read pair ID: {read.query_name}")
+                    
+                else:
+                    # Store this read and wait for its mate
+                    waiting_reads[pair_key] = (read, is_case1, is_case2)
+        
+        print(f"Chunk counts: {chunk_counts}")
+        logging.info(f"Chunk counts: {chunk_counts}")
+        
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
         logging.error(f"Error details: {traceback.format_exc()}")
         logging.error(f"Error occurred at read: {read.to_string()}")
         sys.exit(5)
+
+    # Check if there are any unpaired reads left
+    if waiting_reads:
+        logging.warning(f"There are {len(waiting_reads)} unpaired reads at the end of processing.")
 
     return chunk_counts
