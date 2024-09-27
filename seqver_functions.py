@@ -549,7 +549,7 @@ def process_file(input_file, output_file, markers, threads, max_mem):
         
         return (left_clip >= min_clip_length or right_clip >= min_clip_length) and read.mapping_quality >= 20
 
-    def is_case2_soft_clip(read):
+    def check_case2_soft_clip(read):  
         if not is_significant_soft_clip(read):
             return False
         
@@ -568,7 +568,7 @@ def process_file(input_file, output_file, markers, threads, max_mem):
         
         return False
 
-    def is_case3_supplementary(read):
+    def check_case3_supplementary(read): 
         # Check if the read is supplementary
         is_supplementary = read.flag & 2048 != 0
         
@@ -601,10 +601,10 @@ def process_file(input_file, output_file, markers, threads, max_mem):
                 is_case1 = (is_marker_read and not is_mate_marker_read) or (not is_marker_read and is_mate_marker_read)
                 
                 # Case 2: read is soft-clipped and the clipped part matches a marker
-                is_case2_soft_clip = is_case2_soft_clip(read)
+                is_case2_soft_clip = check_case2_soft_clip(read)  
                 
                 # Case 3: read is supplementary and one of its alternative mappings is to a marker
-                is_case3_supplementary = is_case3_supplementary(read)
+                is_case3_supplementary = check_case3_supplementary(read)  
 
                 if is_case1 or is_case2_soft_clip or is_case3_supplementary:
                     outfile.write(read)
@@ -614,22 +614,6 @@ def process_file(input_file, output_file, markers, threads, max_mem):
                         chunk_counts['case2_soft_clip'] += 1
                     elif is_case3_supplementary:
                         chunk_counts['case3_supplementary'] += 1
-
-                # Process the mate if it's available
-                if read.is_paired and not read.mate_is_unmapped:
-                    mate = infile.mate(read)
-                    is_mate_marker_read = mate.reference_name in markers
-                    is_mate_case2 = is_case2_soft_clip(mate)
-                    is_mate_case3 = is_case3_supplementary(mate)
-
-                    if is_case1 or is_mate_case2 or is_mate_case3:
-                        outfile.write(mate)
-                        if is_case1:
-                            chunk_counts['case1'] += 1
-                        elif is_mate_case2:
-                            chunk_counts['case2_soft_clip'] += 1
-                        elif is_mate_case3:
-                            chunk_counts['case3_supplementary'] += 1
 
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
