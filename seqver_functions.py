@@ -381,7 +381,7 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
     '''
     Filters the readout dictionary based on coverage and calculates the confidence score
     '''
-    print("reached filtering")
+    print("Filtering and scoring starts")
     
     # Debug: Print input parameters
     print(f"Debug: Input parameters - threshold_probability: {threshold_probability}, stringency: {stringency}")
@@ -452,7 +452,7 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
         # Debug: Print final state of editable_readout
         print(f"Debug: Final state of editable_readout: {editable_readout}")
 
-        print("filtering complete")
+        print("Filtering and scoring complete")
         return [readout_dict, editable_readout]
 
     except FileNotFoundError:
