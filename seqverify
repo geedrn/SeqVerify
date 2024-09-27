@@ -23,7 +23,6 @@ parser.add_argument('--untargeted', type=str, required=False, nargs='+') #Name/P
 parser.add_argument('--targeted', type=str, required=False) #Name/Path of command file instructing where to insert known-insertion transgenes
 parser.add_argument('--keepgoing',action='store_const',const=True,required=False,default=False) #continue to next part after completing
 parser.add_argument('--keep_temp', action='store_const',const=True, required=False, default=False) #HIGHLY RECOMMENDED - Option to delete temporary files when the pipeline is done
-parser.add_argument('--verbose', action='store_true', help='Enable verbose output') #Prints out more information about the pipeline's progress
 
 #Genome arguments
 parser.add_argument('--genome', type=str, required=False, default=f"{os.getcwd()}/seqverify_defaults/chm13v2.0.fa") #Name/Path of genome file (CHM13 recommended) used to perform everything but variant calling.
@@ -150,7 +149,11 @@ if not run_command(f'mkdir -p {temp_folder}'):
     print(f"Error: Failed to create folder {temp_folder}")
 
 if args.similarity is not None: #similarity also requires --output to be set, takes two arguments: first the original cell line, then the modified cell line, then --min_quality can be set to change the minimum quality (default: 100).
+    print("Starting similarity check")
+    logging.info("Starting similarity check")
     compare(args.similarity[0],args.similarity[1],args.min_quality,temp_folder,folder,vcf_similarity,vcf_isec)
+    print("Similarity check completed")
+    logging.info("Similarity check completed")
     sys.exit(0)
 
 #The pathFinder function detects whether arguments are paths or names and acts accordingly such that it can handle both cases for ease of use.
@@ -206,7 +209,7 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
     run_command('gunzip seqverify_defaults/clinvar.vcf.gz')
     
     print("Download complete")
-    sys.exit(1)
+    sys.exit(0)
 
 granularity_threshold = args.granularity
 
@@ -399,7 +402,7 @@ if args.start == "markers" or args.start == "all":
 
             except Exception as e:
                 logging.error(f"Failed to process alignments for marker {marker}: {str(e)}")
-                sys.exit(1)
+                sys.exit(2)
 
         #Check if output file was created
         if os.path.exists(f"{temp_folder}/{aligned_diff_chr}"):
@@ -409,7 +412,7 @@ if args.start == "markers" or args.start == "all":
                 logging.warning(f"{aligned_diff_chr} is empty. This might indicate an issue with the filtering process.")
         else:
             logging.error(f"{aligned_diff_chr} was not created")
-            sys.exit(1)    
+            sys.exit(2)    
 
     #Sort and index BAM file
     #This process is necessary nevertheless with and without markers flag
@@ -481,7 +484,7 @@ if args.start == "readout" or args.start == "all":
                 if not success:
                     logging.error("Failed to generate readout")
                     print("Error: Failed to generate readout. Check the log for details.")
-                    sys.exit(1)
+                    sys.exit(2)
             logging.info("Readout processing completed")
 
         if args.keepgoing:
@@ -511,7 +514,7 @@ if args.start == "cnv" or args.start == "all":
         logging.info("Configuring genome for CNV analysis")
         if not genome_configurator(temp_folder, pytor_conf, pytor_gc, genome_with_markers, header):
             logging.error("Failed to configure genome for CNV analysis: str{e}")
-            sys.exit(1)
+            sys.exit(2)
         
         cnvpytor_commands = [
             f'cnvpytor -conf {temp_folder}/{pytor_conf} -root {folder_cnv}/{pytor} -rd {folder_insertion}/{aligned_diff_chr_bam}',
@@ -618,7 +621,7 @@ if args.start == "plots" or args.start == "all":
         logging.info("Generating histograms of depth")
         if not chrHistograms(f'{temp_folder}/{overall_coverage}', marker_list):
             logging.error("Failed to generate histograms")
-            sys.exit(1)
+            sys.exit(2)
         
         run_command(f'mv fig_* {folder_insertion}')
         run_command(f'mv *.cov {temp_folder}')
@@ -675,9 +678,7 @@ if args.start == "variant" or args.start == "all":
     print("Starting variant calling")
     logging.info("Starting variant calling")
 
-    if not run_command(f'mkdir -p {folder_snp}'):
-        logging.error(f"Failed to create directory: {folder_snp}")
-        sys.exit(1)
+    run_command(f'mkdir -p {folder_snp}')
 
     if args.variant_calling is not None and args.variant_calling != []:
         logging.info("Variant calling enabled")
@@ -773,7 +774,7 @@ if args.start == "snp_filtering" or args.start == "all":
                 mutation_logger(folder_snp, variant_lof, variant_vcf_ann, args.min_quality, args.variant_intensity, args.variant_window_size, exact_path)
         except Exception as e:
             logging.error(f"Mutation logger failed: {e}")
-            sys.exit(1)
+            sys.exit(2)
 
         #Check if mutation logger output file was created
         check_mandatory_files(f"{folder_snp}/{variant_lof}")

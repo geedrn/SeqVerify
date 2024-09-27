@@ -36,7 +36,7 @@ def check_mandatory_files(file_path):
         print(f"This file is mandatory for the pipeline to run. Please make sure the file exists and try again.")
         logging.error(f"File not found: {safe_path}")
         logging.error(f"This file is mandatory for the pipeline to run. Please make sure the file exists and try again.")
-        sys.exit(0)
+        sys.exit(1)
 
 def run_command(command, shell=True):
     '''
@@ -69,14 +69,14 @@ def run_command(command, shell=True):
         print(f"Error running command: {command}")
         logging.error(f"Error running command: {command}")
         logging.error(f"Error output: {e.stderr}")
-        sys.exit(1)
+        sys.exit(2)
         raise
     
     except Exception as e:
         print(f"Unexpected error running command: {command}")
         logging.error(f"Unexpected error running command: {command}")
         logging.error(f"Error: {str(e)}")
-        sys.exit(1)
+        sys.exit(3)
         raise
 
 def append_file_content(source_file, target_file):
@@ -98,7 +98,7 @@ def append_file_content(source_file, target_file):
         return True
     except (IOError, PermissionError, Exception) as e:
         logging.error(f"Error while appending file content: {str(e)}")
-        sys.exit(2)
+        sys.exit(4)
         return False
     
 def pathFinder(potential_path): 
@@ -574,6 +574,6 @@ def process_file(input_file, output_file, markers, threads, max_mem):
         logging.error(f"Critical error processing file: {str(e)}")
         logging.error(f"Error details: {traceback.format_exc()}")
         logging.error(f"Error occurred at read: {read.to_string()}")
-        sys.exit(1)
+        sys.exit(5)
 
     return chunk_counts
