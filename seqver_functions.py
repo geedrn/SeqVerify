@@ -540,32 +540,30 @@ def process_file(input_file, output_file, markers, threads, max_mem):
         'case3_supplementary': 0
     }
     
-    def is_significant_soft_clip(read, min_clip_length=20):
+    def check_case2_soft_clip(read, min_match_length=10):
         if not read.cigar:
             return False
-        
+
+        # Check for soft clipping
         left_clip = read.cigar[0][1] if read.cigar[0][0] == 4 else 0
         right_clip = read.cigar[-1][1] if read.cigar[-1][0] == 4 else 0
-        
-        return (left_clip >= min_clip_length or right_clip >= min_clip_length) and read.mapping_quality >= 20
 
-    def check_case2_soft_clip(read):  
-        if not is_significant_soft_clip(read):
-            return False
-        
-        # Get the sequence of the soft-clipped part
-        if read.cigar[0][0] == 4:  # Left-side soft clip
-            clipped_seq = read.query_sequence[:read.cigar[0][1]]
-        elif read.cigar[-1][0] == 4:  # Right-side soft clip
-            clipped_seq = read.query_sequence[-read.cigar[-1][1]:]
-        else:
-            return False
-        
-        # Check if the soft-clipped sequence matches with any marker sequence
-        for marker in markers:
-            if clipped_seq in marker or marker in clipped_seq:
-                return True
-        
+        # Process left clip
+        # Check if 10 bases of the clipped sequence match any of the markers
+        if left_clip >= min_match_length:
+            left_clipped_seq = read.query_sequence[:left_clip]
+            for marker in markers:
+                if marker.find(left_clipped_seq[:min_match_length]) != -1:
+                    return True
+
+        # Process right clip
+        # Check if 10 bases of the clipped sequence match any of the markers
+        if right_clip >= min_match_length:
+            right_clipped_seq = read.query_sequence[-right_clip:]
+            for marker in markers:
+                if marker.find(right_clipped_seq[-min_match_length:]) != -1:
+                    return True
+
         return False
 
     def check_case3_supplementary(read): 
