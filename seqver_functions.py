@@ -529,16 +529,18 @@ def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
     run_command(f"bcftools isec -p {temp_folder}/dir {temp_folder}/{vcf_1}.gz {temp_folder}/{vcf_2}.gz", shell=True)
     run_command(f"mv {temp_folder}/dir/0001.vcf {folder}/{isec}", shell=True)
 
-def check_chimeric_and_split_alignments(read, markers):
-    # Check SA (Chimeric Alignment) tag
+def check_chimeric_and_alternative_alignments(read, markers):
+    # Check SA (Supplementary Alignment) tag
     sa_tag = dict(read.tags).get('SA')
     if sa_tag:
         sa_alignments = sa_tag.split(';')
         for sa in sa_alignments:
             if sa:
                 sa_parts = sa.split(',')
-                if sa_parts[0] in markers:
-                    return True
+                chimeric_ref_name = sa_parts[0]
+                if (chimeric_ref_name in markers and read.reference_name not in markers) or \
+                   (chimeric_ref_name not in markers and read.reference_name in markers):
+                    return True, "SA"
 
     # Check XA (Alternative Hits) tag
     xa_tag = dict(read.tags).get('XA')
@@ -547,76 +549,47 @@ def check_chimeric_and_split_alignments(read, markers):
         for xa in xa_alignments:
             if xa:
                 xa_parts = xa.split(',')
-                if xa_parts[0] in markers:
-                    return True
+                alt_ref_name = xa_parts[0]
+                if (alt_ref_name in markers and read.reference_name not in markers) or \
+                   (alt_ref_name not in markers and read.reference_name in markers):
+                    return True, "XA"
 
-    return False
+    return False, None
 
 def process_file(input_file, output_file, markers, threads, max_mem):
     resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
     
-    chunk_counts = {
-        'case1': 0,  # Only paired-end condition
-        'case2': 0,  # Only chimeric or split alignment
-        'case3': 0   # Both conditions
-    }
+    counts = {"SA_chimeric": 0, "XA_alternative": 0}
     
     try:
         with pysam.AlignmentFile(input_file, "r") as infile, \
              pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
             
-            # Dictionary to store reads waiting for their mate
-            waiting_reads = {}
-            
             for read in infile:
-                if read.is_unmapped or read.mate_is_unmapped:
+                if read.is_unmapped:
                     continue
                 
-                # Generate a unique key for the read pair
-                pair_key = (read.query_name, read.reference_name, read.next_reference_name)
-                
-                is_marker_read = read.reference_name in markers
-                is_mate_marker_read = read.next_reference_name in markers
-                is_case1 = (is_marker_read and not is_mate_marker_read) or (not is_marker_read and is_mate_marker_read)
-                is_case2 = check_chimeric_and_split_alignments(read, markers)
-                
-                if pair_key in waiting_reads:
-                    # We have both reads of the pair now
-                    mate = waiting_reads.pop(pair_key)
-                    
-                    # Determine the case for the pair
-                    if (is_case1 and is_case2) or (mate[1] and mate[2]):
-                        chunk_counts['case3'] += 1
-                        case = 'case3'
-                    elif is_case1 or mate[1]:
-                        chunk_counts['case1'] += 1
-                        case = 'case1'
-                    elif is_case2 or mate[2]:
-                        chunk_counts['case2'] += 1
-                        case = 'case2'
-                    else:
-                        continue  # Neither read in the pair meets any condition
-                    
-                    # Write both reads
-                    outfile.write(mate[0])
+                is_chimeric, tag_type = check_chimeric_and_alternative_alignments(read, markers)
+                if is_chimeric:
                     outfile.write(read)
-                    logging.debug(f"{case} found: Read pair ID: {read.query_name}")
-                    
-                else:
-                    # Store this read and wait for its mate
-                    waiting_reads[pair_key] = (read, is_case1, is_case2)
-        
-        print(f"Chunk counts: {chunk_counts}")
-        logging.info(f"Chunk counts: {chunk_counts}")
-        
+                    if tag_type == "SA":
+                        counts["SA_chimeric"] += 1
+                        logging.debug(f"SA chimeric alignment found: Read ID: {read.query_name}, "
+                                      f"Primary ref: {read.reference_name}, "
+                                      f"Supplementary ref: {dict(read.tags).get('SA', '').split(',')[0]}")
+                    elif tag_type == "XA":
+                        counts["XA_alternative"] += 1
+                        logging.debug(f"XA alternative alignment found: Read ID: {read.query_name}, "
+                                      f"Primary ref: {read.reference_name}, "
+                                      f"Alternative ref: {dict(read.tags).get('XA', '').split(',')[0]}")
+
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
         logging.error(f"Error details: {traceback.format_exc()}")
         logging.error(f"Error occurred at read: {read.to_string()}")
         sys.exit(5)
 
-    # Check if there are any unpaired reads left
-    if waiting_reads:
-        logging.warning(f"There are {len(waiting_reads)} unpaired reads at the end of processing.")
+    logging.info(f"Total SA chimeric reads found: {counts['SA_chimeric']}")
+    logging.info(f"Total XA alternative reads found: {counts['XA_alternative']}")
+    return counts
 
-    return chunk_counts
