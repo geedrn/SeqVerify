@@ -252,6 +252,7 @@ run_command('echo $_JAVA_OPTIONS')
 if args.start == "beginning" or args.start == "all":
     #Preliminary Work - Generates the output folders given a specified --output string as well as the temp folder for the pipeline to work within
     run_command(f'mkdir -p {folder_insertion}')
+
         
     #Automatic Preparation of Collated Genome:
     #Collates all markers/transgenes into a single FASTA file for ease of handling
@@ -299,6 +300,11 @@ if args.start == "beginning" or args.start == "all":
     
     logging.info(f"Copying reference genome to: {temp_folder}/{genome_with_markers}")
     run_command(f'cp {genome_source_path} {temp_folder}/{genome_with_markers}')
+
+    #Check if input files exist
+    check_mandatory_files(f"{temp_folder}/{genome_with_markers}")
+    check_mandatory_files(reads_1_path)
+    check_mandatory_files(reads_2_path)
     
     if marker_sources_path:
         #Create an empty marker list file
@@ -337,11 +343,6 @@ if args.start == "beginning" or args.start == "all":
 if args.start == "align" or args.start == "all":
     print("Starting alignment process")
     logging.info("Starting alignment process")
-
-    #Check if input files exist
-    check_mandatory_files(f"{temp_folder}/{genome_with_markers}")
-    check_mandatory_files(reads_1_path)
-    check_mandatory_files(reads_2_path)
 
     #Aligns the new genome using BWA-MEM
     print("Aligning reads to genome using BWA-MEM")
@@ -387,6 +388,8 @@ if args.start == "markers" or args.start == "all":
         #Use functions based on pysam to select reads with chimeric characteristics
         for marker in markers:
             try:
+                print(f"Processing marker: {marker}")
+                logging.info(f"Processing marker: {marker}")
                 logging.info(f"Processing file: {aligned_with_markers}")
                 logging.info(f"Number of processes: {threads}")
                 logging.info(f"Max memory per process: {max_mem / (1024 * 1024 * 1024):.2f} GB")
@@ -410,14 +413,17 @@ if args.start == "markers" or args.start == "all":
 
     #Sort and index BAM file
     #This process is necessary nevertheless with and without markers flag
+    print("Sorting and indexing BAM file")
     logging.info("Sorting and indexing BAM file")
     run_command(f"samtools sort -@ {threads} {temp_folder}/{aligned_with_markers} > {folder_insertion}/{aligned_diff_chr_bam}")
     run_command(f"samtools index -@ {threads} {folder_insertion}/{aligned_diff_chr_bam}")
 
     #Create header from BAM file
+    print("Creating header from BAM file")
     logging.info("Creating header from BAM file")
     run_command(f'samtools view -@ {threads} -H {folder_insertion}/{aligned_diff_chr_bam} > {temp_folder}/{header}')
 
+    print("Markers processing completed")
     logging.info("Marker processing completed")
 
     if args.keepgoing:
