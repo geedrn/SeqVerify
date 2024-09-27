@@ -7,20 +7,43 @@ import sys
 import shutil
 import logging
 import shlex
+import pysam
+import logging
+import multiprocessing
+import os
+from functools import partial
+import resource
 
 supp_tags = ['SA','XA'] #sets the two possible optional alignments, chimeric and split respectively
 
-def sanitize_filepath(filepath):
-    return os.path.normpath(os.path.abspath(filepath))
-
 def check_file_exists(file_path):
-    safe_path = sanitize_filepath(file_path)
+    '''
+    Check if a file exists at the specified path
+    '''
+    safe_path = os.path.normpath(os.path.abspath(file_path))
     if not os.path.exists(safe_path):
         print(f"Error: File not found: {safe_path}")
+        logging.warning(f"File not found: {safe_path}")
         return False
     return True
 
+def check_mandatory_files(file_path):
+    '''
+    Check if a file exists at the specified path and exit if it doesn't
+    '''
+    safe_path = os.path.normpath(os.path.abspath(file_path))
+    if not os.path.exists(safe_path):
+        print(f"Error: File not found: {safe_path}")
+        print(f"This file is mandatory for the pipeline to run. Please make sure the file exists and try again.")
+        logging.error(f"File not found: {safe_path}")
+        logging.error(f"This file is mandatory for the pipeline to run. Please make sure the file exists and try again.")
+        sys.exit(0)
+
 def run_command(command, shell=True):
+    '''
+    Run a command in the shell and return the output
+    If the command fails, print the error and exit the script
+    '''
     try:
         if shell:
             if isinstance(command, list):
@@ -39,19 +62,29 @@ def run_command(command, shell=True):
             logging.info(f"Command output:\n{result.stdout}")
         
         if result.stderr:
-            logging.warning(f"Command stderr:\n{result.stderr}")
+            logging.info(f"Command stderr:\n{result.stderr}")
         
         return result.returncode, result.stdout, result.stderr
+    
     except subprocess.CalledProcessError as e:
+        print(f"Error running command: {command}")
         logging.error(f"Error running command: {command}")
         logging.error(f"Error output: {e.stderr}")
+        sys.exit(1)
         raise
+    
     except Exception as e:
+        print(f"Unexpected error running command: {command}")
         logging.error(f"Unexpected error running command: {command}")
         logging.error(f"Error: {str(e)}")
+        sys.exit(1)
         raise
 
 def append_file_content(source_file, target_file):
+    '''
+    Append the content of a source file to a target file
+    This function is used to append the genome sequence with untargeted options
+    '''
     try:
         source_file = os.path.normpath(os.path.abspath(source_file))
         target_file = os.path.normpath(os.path.abspath(target_file))
@@ -66,15 +99,13 @@ def append_file_content(source_file, target_file):
         return True
     except (IOError, PermissionError, Exception) as e:
         logging.error(f"Error while appending file content: {str(e)}")
+        sys.exit(2)
         return False
-
-def handle_error(message, exception=None):
-    logging.error(message)
-    if exception:
-        logging.error(f"Exception details: {str(exception)}")
-    sys.exit(1)
     
-def pathFinder(potential_path): #defines pathFinder, a function that checks if a variable is a filename or path
+def pathFinder(potential_path): 
+    '''
+    defines pathFinder, a function that checks if a variable is a filename or path
+    '''
     if "/" in potential_path:
         path = potential_path
     else:
@@ -83,8 +114,10 @@ def pathFinder(potential_path): #defines pathFinder, a function that checks if a
 
 class SamAlignment:
     def __init__(self, alignment): 
-        #Defines all required parameters as specified in the SAM Manual to avoid dealing with slicing in future, as well as ALIGNMENT, a parameter containing the entire string, and OPTIONAL, a list containing all the optional fields
-        
+        '''
+        Defines all required parameters as specified in the SAM Manual to avoid dealing with slicing in future, as well as ALIGNMENT, 
+        a parameter containing the entire string, and OPTIONAL, a list containing all the optional fields
+        '''
         #Whole alignment string
         self.ALIGNMENT = alignment
 
@@ -108,47 +141,26 @@ class SamAlignment:
         except IndexError:
             self.OPTIONAL = None #if optional fields do not exist, self.OPTIONAL returns None
 
-    def __str__(self): #making an alignment into a string returns the original line from the sam file
+    def __str__(self): 
+        '''
+        making an alignment into a string returns the original line from the sam file
+        '''
         return self.ALIGNMENT
 
-    def parse_xa_tag(self):
-        xa_tag = self.optionalTag("XA")
-        if xa_tag is None:
-            return []
-        alignments = []
-        for alignment in xa_tag[2].split(';'):
-            if alignment:
-                chrom, pos, cigar, nm = alignment.split(',')
-                alignments.append([chrom, int(pos)])
-        return alignments
-
-    def parse_sa_tag(self):
-        sa_tag = self.optionalTag("SA")
-        if sa_tag is None:
-            return []
-        alignments = []
-        for alignment in sa_tag[2].split(';'):
-            if alignment:
-                chrom, pos, strand, cigar, mapq, nm = alignment.split(',')
-                alignments.append([chrom, int(pos)])
-        return alignments
-
-    def allPositions(self):
-        positions = [self.position()]
-        mate_position = self.matePosition()
-        if mate_position[0] != '*':  # '*' は未マップを示す
-            positions.append(mate_position)
-        positions.extend(self.supplementaryPosition(supp_tags))
-        return positions
-
-    def optionalTag(self,tag_code): #finds optional tag (if it exists, otherwise returns None) and separates it into [TAG,TYPE,VALUE] as determined in the SAM manual
+    def optionalTag(self,tag_code): 
+        '''
+        finds optional tag (if it exists, otherwise returns None) and separates it into [TAG,TYPE,VALUE] as determined in the SAM manual
+        '''
         if self.OPTIONAL == None:
             return None
         for tag in self.OPTIONAL:
             if tag.startswith(tag_code):
                 return tag.split(':')
 
-    def supplementaryAlignments(self,tag_list=['SA','XA']): #finds supplementary alignments corresponding to the tags input (it expects a list). tags that follow this convention are SA (chimeric reads) and XA (split reads)
+    def supplementaryAlignments(self,tag_list=['SA','XA']): 
+        '''
+        finds supplementary alignments corresponding to the tags input (it expects a list). tags that follow this convention are SA (chimeric reads) and XA (split reads)
+        '''
         supplementary_alignment_list = [] 
         for i in tag_list:
             optional_tag = self.optionalTag(i)
@@ -159,7 +171,10 @@ class SamAlignment:
             supplementary_alignment_list = supplementary_alignment_list + [a.split(',') for a in supplementary_alignments if len(a) >= 2] #returns a list of lists of type [rname, pos, strand, CIGAR, mapQ, NM]
         return supplementary_alignment_list            
 
-    def softClippingLen(self, cigar): #finds the length of the alignment until we hit softclipping in a string, if any, otherwise returns 0
+    def softClippingLen(self, cigar): 
+        '''
+        finds the length of the alignment until we hit softclipping in a string, if any, otherwise returns 0
+        '''
         if "S" in cigar:
             cigar_split = re.split('(\d+)',cigar) #splits CIGAR string by regex matching groups of one or more digits
             cigar_letters = [cigar_split[i] for i in range(len(cigar_split)) if i % 2 == 0 and cigar_split[i] != ''] #takes the indicator letters of the CIGAR
@@ -182,16 +197,25 @@ class SamAlignment:
             return 0
 
     def position(self):
-        return [self.RNAME,int(self.POS)] #used to be just the int() statement
+        '''
+        used to be just the int() statement
+        '''
+        return [self.RNAME,int(self.POS)]
 
     def matePosition(self):
+        '''
+        Determines the position of the mate of the read, taking into account the CIGAR string and the MC tag if it exists
+        '''
         mate_pos = int(self.PNEXT)
         mc_tag = self.optionalTag("MC")
         if mc_tag is not None:
             mate_pos += self.softClippingLen(mc_tag[-1])
         return [self.RNEXT, mate_pos]
 
-    def supplementaryPosition(self,tag_list=['SA','XA']): #denotes where positions of supplementary alignments are exactly, given we know those are insertion sites
+    def supplementaryPosition(self,tag_list=['SA','XA']): 
+        '''
+        denotes where positions of supplementary alignments are exactly, given we know those are insertion sites
+        '''
         positions = []
         supplementaries = self.supplementaryAlignments(tag_list) #finds all supplementary alignments
         for match in supplementaries:
@@ -209,12 +233,18 @@ class SamAlignment:
             positions.append([match[0],-1*position]) #if a supplementary alignment is found, at the end we append its position multiplied by -1 to make sure it is not lost in granularity calculations with the non-supplementary alignments
         return positions
 
-    def allPositions(self,tag_list=['SA','XA']): #returns position of the alignment, of its mate, and any supplementary alignments as a three-item list [[position],[mateposition],[supplementalaligmentposition]]
+    def allPositions(self,tag_list=['SA','XA']): 
+        '''
+        #returns position of the alignment, of its mate, and any supplementary alignments as a three-item list [[position],[mateposition],[supplementalaligmentposition]]
+        '''
         required_positions = [self.position(),self.matePosition()]
         required_positions.extend(self.supplementaryPosition(tag_list))
         return required_positions
 
-def group(samfile): #returns a dictionary containing all reference transgene chromosomes. each of those then contains another dictionary containing all the chromosomes that got mapped to, and each of those contains a dictionary containing the position of the mappings and how many times they were mapped to it.
+def group(samfile): 
+    '''
+    returns a dictionary containing all reference transgene chromosomes. each of those then contains another dictionary containing all the chromosomes that got mapped to, and each of those contains a dictionary containing the position of the mappings and how many times they were mapped to it.
+    '''
     print("Grouping reads by chromosome")
     logging.info("Grouping reads by chromosome")
     alignments = {}
@@ -277,7 +307,10 @@ def group(samfile): #returns a dictionary containing all reference transgene chr
     print("Grouping complete")
     return alignments
 
-def compress(alignment_dict, granularity=500): #compresses the alignments to the desired granularity
+def compress(alignment_dict, granularity=500): 
+    '''
+    compresses the alignments to the desired granularity
+    '''
     print("Compressing reads")
     logging.info("Compressing reads")
     readout_dict = {} #initializes final dictionary as empty
@@ -346,6 +379,9 @@ def compress(alignment_dict, granularity=500): #compresses the alignments to the
     return final_readout_dict
 
 def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, threshold_probability, stringency):
+    '''
+    Filters the readout dictionary based on coverage and calculates the confidence score
+    '''
     print("reached filtering")
     
     # Debug: Print input parameters
@@ -425,6 +461,9 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
         return readout_dict, readout_dict
 
 def readout(folder, insertion_dict, chr_filter, min_matches=1):
+    '''
+    This function generates the readout file from the insertion dictionary
+    '''
     #original_dict parameter removed as it is not used in the current implementation
     print("Readoout generation")
     logging.info("Starting readout generation")
@@ -466,6 +505,10 @@ def readout(folder, insertion_dict, chr_filter, min_matches=1):
         return False
     
 def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
+    '''
+    This function compares two VCF files and generates a comparison file
+    Only active if the user specifies two VCF files
+    '''
     for vcf in [vcf_1, vcf_2]:
         run_command(f"bgzip -f {vcf}", shell=True)
         run_command(f"mv {vcf}.gz {temp_folder}", shell=True)
@@ -488,3 +531,69 @@ def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
 
     run_command(f"bcftools isec -p {temp_folder}/dir {temp_folder}/{vcf_1}.gz {temp_folder}/{vcf_2}.gz", shell=True)
     run_command(f"mv {temp_folder}/dir/0001.vcf {folder}/{isec}", shell=True)
+
+def process_chunk(input_file, output_file, markers, start, end, max_chunk_size, max_mem):
+    resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
+    chunk_counts = {
+        'case1': 0,
+        'case2_soft_clip': 0,
+        'case2_supplementary': 0
+    }
+    
+    with pysam.AlignmentFile(input_file, "rb") as infile, \
+         pysam.AlignmentFile(output_file, "wb", template=infile) as outfile:
+        
+        infile.seek(start)
+        current_pos = start
+        while current_pos < end:
+            chunk_end = min(current_pos + max_chunk_size, end)
+            
+            def read_generator():
+                while infile.tell() < chunk_end:
+                    try:
+                        yield next(infile)
+                    except StopIteration:
+                        break
+
+            for read in read_generator():
+                if read.reference_name in markers:
+                    #case1: either read is mapped to a marker and its mate is not
+                    is_case1 = read.next_reference_name not in markers and read.next_reference_name != '='
+                    #case2: either read is soft-clipped
+                    #soft-clipped means the read is not fully mapped to the reference genome
+                    is_case2_soft_clip = read.cigar is not None and (read.cigar[0][0] == 4 or read.cigar[-1][0] == 4)
+                    #case3: either read is supplementary
+                    #supplementary means the reads can be mapped to multiple locations
+                    is_case2_supplementary = read.flag & 2048 != 0
+
+                    if is_case1:
+                        outfile.write(read)
+                        chunk_counts['case1'] += 1
+                    elif is_case2_soft_clip:
+                        outfile.write(read)
+                        chunk_counts['case2_soft_clip'] += 1
+                    elif is_case2_supplementary:
+                        outfile.write(read)
+                        chunk_counts['case2_supplementary'] += 1
+
+            current_pos = chunk_end
+
+    return chunk_counts
+
+def process_file(input_file, output_file, markers, num_threads, max_mem_per_process):
+    file_size = os.path.getsize(input_file)
+    chunk_size = file_size // num_threads
+    max_chunk_size = 1024 * 1024 * 100  #Max 100MB per chunk
+
+    pool = multiprocessing.Pool(processes=num_threads)
+    process_func = partial(process_chunk, input_file, output_file, markers, max_chunk_size=max_chunk_size, max_mem=max_mem_per_process)
+
+    chunks = [(i * chunk_size, (i + 1) * chunk_size) for i in range(num_threads)]
+    chunks[-1] = (chunks[-1][0], file_size)  #Last chunk goes to the end of the file
+
+    results = pool.starmap(process_func, chunks)
+    pool.close()
+    pool.join()
+
+    total_counts = {key: sum(result[key] for result in results) for key in results[0]}
+    return total_counts
