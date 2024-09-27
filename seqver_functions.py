@@ -529,59 +529,38 @@ def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
     run_command(f"bcftools isec -p {temp_folder}/dir {temp_folder}/{vcf_1}.gz {temp_folder}/{vcf_2}.gz", shell=True)
     run_command(f"mv {temp_folder}/dir/0001.vcf {folder}/{isec}", shell=True)
 
+def check_chimeric_and_split_alignments(read, markers):
+    # Check SA (Chimeric Alignment) tag
+    sa_tag = dict(read.tags).get('SA')
+    if sa_tag:
+        sa_alignments = sa_tag.split(';')
+        for sa in sa_alignments:
+            if sa:
+                sa_parts = sa.split(',')
+                if sa_parts[0] in markers:
+                    return True
+
+    # Check XA (Alternative Hits) tag
+    xa_tag = dict(read.tags).get('XA')
+    if xa_tag:
+        xa_alignments = xa_tag.split(';')
+        for xa in xa_alignments:
+            if xa:
+                xa_parts = xa.split(',')
+                if xa_parts[0] in markers:
+                    return True
+
+    return False
+
 def process_file(input_file, output_file, markers, threads, max_mem):
     resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
     
     chunk_counts = {
-        'case1': 0,
-        'case2_soft_clip': 0,
-        'case3_supplementary': 0
+        'case1': 0,  # Only paired-end condition
+        'case2': 0,  # Only chimeric or split alignment
+        'case3': 0   # Both conditions
     }
     
-    def check_case2_soft_clip(read, min_match_length=10):
-        if not read.cigar:
-            return False
-
-        # Check for soft clipping
-        left_clip = read.cigar[0][1] if read.cigar[0][0] == 4 else 0
-        right_clip = read.cigar[-1][1] if read.cigar[-1][0] == 4 else 0
-
-        # Process left clip
-        # Check if 10 bases of the clipped sequence match any of the markers
-        if left_clip >= min_match_length:
-            left_clipped_seq = read.query_sequence[:left_clip]
-            for marker in markers:
-                if marker.find(left_clipped_seq[:min_match_length]) != -1:
-                    return True
-
-        # Process right clip
-        # Check if 10 bases of the clipped sequence match any of the markers
-        if right_clip >= min_match_length:
-            right_clipped_seq = read.query_sequence[-right_clip:]
-            for marker in markers:
-                if marker.find(right_clipped_seq[-min_match_length:]) != -1:
-                    return True
-
-        return False
-
-    def check_case3_supplementary(read): 
-        # Check if the read is supplementary
-        is_supplementary = read.flag & 2048 != 0
-        
-        if not is_supplementary:
-            return False
-        
-        # Check if any of the alternative mappings are to a marker
-        for tag in read.get_tags():
-            if tag[0] == 'SA':  # SA tag contains supplementary alignment information
-                supplementary_alignments = tag[1].split(';')
-                for aln in supplementary_alignments:
-                    aln_parts = aln.split(',')
-                    if aln_parts[0] in markers:  # Check if the reference name is a marker
-                        return True
-        
-        return False
-
     try:
         with pysam.AlignmentFile(input_file, "r") as infile, \
              pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
@@ -596,29 +575,25 @@ def process_file(input_file, output_file, markers, threads, max_mem):
                 # Case 1: either read is mapped to a marker and its mate is not, or vice versa
                 is_case1 = (is_marker_read and not is_mate_marker_read) or (not is_marker_read and is_mate_marker_read)
                 
-                # Case 2: read is soft-clipped and the clipped part matches a marker
-                is_case2_soft_clip = check_case2_soft_clip(read)  
-                
-                # Case 3: read is supplementary and one of its alternative mappings is to a marker
-                is_case3_supplementary = check_case3_supplementary(read)  
+                # Check for chimeric or split alignments
+                is_case2 = check_chimeric_and_split_alignments(read, markers)
 
-                if is_case1 or is_case2_soft_clip or is_case3_supplementary:
+                if is_case1 and is_case2:
                     outfile.write(read)
-                    if is_case1:
-                        chunk_counts['case1'] += 1
-                    elif is_case2_soft_clip:
-                        chunk_counts['case2_soft_clip'] += 1
-                    elif is_case3_supplementary:
-                        chunk_counts['case3_supplementary'] += 1
+                    chunk_counts['case3'] += 1
+                    logging.debug(f"Case 3 found: Read ID: {read.query_name}")
+                elif is_case1:
+                    outfile.write(read)
+                    chunk_counts['case1'] += 1
+                    logging.debug(f"Case 1 found: Read ID: {read.query_name}")
+                elif is_case2:
+                    outfile.write(read)
+                    chunk_counts['case2'] += 1
+                    logging.debug(f"Case 2 found: Read ID: {read.query_name}")
 
-            # Report the number of reads in each category
-            print(f"Case 1: {chunk_counts['case1']}")
-            logging.info(f"Case 1: {chunk_counts['case1']}")
-            print(f"Case 2 (Soft Clip): {chunk_counts['case2_soft_clip']}")
-            logging.info(f"Case 2 (Soft Clip): {chunk_counts['case2_soft_clip']}")
-            print(f"Case 3 (Supplementary): {chunk_counts['case3_supplementary']}")
-            logging.info(f"Case 3 (Supplementary): {chunk_counts['case3_supplementary']}")
-            
+            print(f"Chunk counts: {chunk_counts}")
+            logging.info(f"Chunk counts: {chunk_counts}")
+
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
         logging.error(f"Error details: {traceback.format_exc()}")
