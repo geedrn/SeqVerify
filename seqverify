@@ -88,6 +88,7 @@ if args.config is not None:
     args.variant_intensity = config["VARIANT"]["variant_intensity"]
     args.variant_window_size = int(config["VARIANT"]["variant_window_size"])
     args.min_quality = int(config["OTHER"]["min_quality"])
+
 output_name = args.output 
 
 #Stores Variable/Folder Names:
@@ -123,31 +124,6 @@ folder_cnv = f"{folder}/copy_number"
 folder_kraken = f"{folder}/kraken"
 folder_snp =f"{folder}/variant_calling"   
 
-# File name with output
-def setup_logging(folder, output):
-    try:
-        # Ensure the log directory exists
-        os.makedirs(os.path.dirname(f"{folder}/{output}.log"), exist_ok=True)
-        
-        log_file = f"{folder}/{output}.log"
-        logging.basicConfig(
-            filename=log_file,
-            level=logging.DEBUG,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
-        print(f"Logging initialized. Log file: {log_file}")
-        logging.info(f"Logging initialized. Log file: {log_file}")
-    except Exception as e:
-        print(f"Error setting up logging: {str(e)}")
-        raise
-
-setup_logging(folder, args.output)
-print("SeqVerify execution starts")
-logging.info("SeqVerify execution starts")
-
-if not run_command(f'mkdir -p {temp_folder}'):
-    print(f"Error: Failed to create folder {temp_folder}")
-
 if args.similarity is not None: #similarity also requires --output to be set, takes two arguments: first the original cell line, then the modified cell line, then --min_quality can be set to change the minimum quality (default: 100).
     print("Starting similarity check")
     logging.info("Starting similarity check")
@@ -156,23 +132,11 @@ if args.similarity is not None: #similarity also requires --output to be set, ta
     logging.info("Similarity check completed")
     sys.exit(0)
 
-#The pathFinder function detects whether arguments are paths or names and acts accordingly such that it can handle both cases for ease of use.
-reads_1_path = pathFinder(args.reads_1)
-reads_2_path = pathFinder(args.reads_2)
-genome_source_path = pathFinder(args.genome)
-
-marker_sources_path = None
-exact_path = None
-database = None
-gtf_file = None
-gtf = None  
-
 if args.download_defaults: #If --download_defaults is set, downloads the three databases and quits the program
     #Note: These FTP links are likely to change over time and break the command. 
     #Note: Please open an issue on GitHub if they do! https://github.com/mpiersonsmela/SeqVerify
     #Note: If download_defaults is set, the system stops after downloading the default files
     print("Downloading default files")
-    print("Making seqverify_defaults directory")
     run_command('mkdir seqverify_defaults')
 
     #Downloads chm13v2.0 as a reference genome for everything except the variant calling
@@ -210,6 +174,42 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
     
     print("Download complete")
     sys.exit(0)
+
+# File name with output
+def setup_logging(folder, output):
+    try:
+        # Ensure the log directory exists
+        os.makedirs(os.path.dirname(f"{folder}/{output}.log"), exist_ok=True)
+        
+        log_file = f"{folder}/{output}.log"
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        print(f"Logging initialized. Log file: {log_file}")
+        logging.info(f"Logging initialized. Log file: {log_file}")
+    except Exception as e:
+        print(f"Error setting up logging: {str(e)}")
+        raise
+
+setup_logging(folder, args.output)
+print("SeqVerify execution starts")
+logging.info("SeqVerify execution starts")
+
+if not run_command(f'mkdir -p {temp_folder}'):
+    print(f"Error: Failed to create folder {temp_folder}")
+    
+#The pathFinder function detects whether arguments are paths or names and acts accordingly such that it can handle both cases for ease of use.
+reads_1_path = pathFinder(args.reads_1)
+reads_2_path = pathFinder(args.reads_2)
+genome_source_path = pathFinder(args.genome)
+
+marker_sources_path = None
+exact_path = None
+database = None
+gtf_file = None
+gtf = None  
 
 granularity_threshold = args.granularity
 
