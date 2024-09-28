@@ -255,9 +255,6 @@ def group(samfile):
                 ref_chromosome = matches[0][0] #takes name of ref chromosome
                 all_positions = matches #includes all positions, including the primary alignment
                 
-                # Debug: Print information about each alignment
-                print(f"Debug: Processing alignment - Ref Chromosome: {ref_chromosome}, Matches: {matches}")
-                
                 if ref_chromosome not in alignments:
                     alignments[ref_chromosome] = {} #if the reference chromosome hasn't been seen yet, creates a new entry
                 
@@ -276,9 +273,6 @@ def group(samfile):
                     else:
                         alignments[ref_chromosome][aligned_chrm_name][site][0] += 1
                 
-                # Debug: Print current state of alignments after processing each read
-                print(f"Debug: Current alignments state: {alignments}")
-                
     except FileNotFoundError:  # Change: Add error handling for file not found
         print(f"Error: The SAM file '{samfile}' was not found.")
         return None
@@ -288,19 +282,6 @@ def group(samfile):
         print("Warning: No alignments found. This might indicate no mapping to sequences.")
         return None
 
-    # Debug: Print final state before processing chimeric reads
-    print("Debug: Final state before processing chimeric reads:")
-    print(alignments)
-
-    # This loop is no longer necessary as we're processing chimeric reads in the main loop
-    # But we keep it for consistency with the original output format
-    for ref_chromosome, aligned in alignments.items():
-        for aligned_chromosome, alignment_data in aligned.items():
-            for site in alignment_data.keys():
-                # Debug: Print each site after processing
-                print(f"Debug: Processed site - Ref: {ref_chromosome}, Aligned: {aligned_chromosome}, Site: {site}, Result: {alignments[ref_chromosome][aligned_chromosome][site]}")
-
-    print(alignments)
     print("Grouping complete")
     return alignments
 
@@ -311,9 +292,6 @@ def compress(alignment_dict, granularity=500):
     print("Compressing reads")
     logging.info("Compressing reads")
     readout_dict = {} #initializes final dictionary as empty
-    
-    # Debug: Print input alignment_dict
-    print(f"Debug: Input alignment_dict: {alignment_dict}")
     
     for reference_chromosome, alignments in alignment_dict.items():
         readout_dict[reference_chromosome] = {}
@@ -334,20 +312,11 @@ def compress(alignment_dict, granularity=500):
                         if abs(possible_location - location) < granularity: #if the point is at least close enough to one point to be put in its bin, finds which point it is and adds it to it.
                             matches = readout_dict[reference_chromosome][aligned_chromosome][possible_location]
                             readout_dict[reference_chromosome][aligned_chromosome][possible_location] = [sum(x) for x in zip(matches, repetitions)] #repetitions
-                
-                # Debug: Print current state of readout_dict after processing each location
-                print(f"Debug: Current readout_dict state for {reference_chromosome}, {aligned_chromosome}, {location}: {readout_dict[reference_chromosome][aligned_chromosome]}")
-    
-    # Debug: Print state of readout_dict before processing chimeric sites
-    print(f"Debug: readout_dict before processing chimeric sites: {readout_dict}")
     
     final_readout_dict = deepcopy(readout_dict)
     for reference_chromosome, alignments in readout_dict.items():
         for aligned_chromosome, alignment_data in alignments.items():
             chimeric_sites = [site for site in alignment_data.keys() if str(site)[0] == "-"]
-            
-            # Debug: Print chimeric sites found
-            print(f"Debug: Chimeric sites found for {reference_chromosome}, {aligned_chromosome}: {chimeric_sites}")
             
             for chimeric_site in chimeric_sites:
                 locations = list(final_readout_dict[reference_chromosome][aligned_chromosome].keys())
@@ -356,21 +325,13 @@ def compress(alignment_dict, granularity=500):
                 close_locations_indices = [index for index, location in enumerate(locations) if abs(chimeric_site_positive_coordinates - location) <= granularity and int(location) >= 0]
                 
                 total_reads = final_readout_dict[reference_chromosome][aligned_chromosome][chimeric_site]
-                print(f"Debug: deleting chimeric site {chimeric_site}")
                 del final_readout_dict[reference_chromosome][aligned_chromosome][chimeric_site]
                 for index in close_locations_indices:
                     location_at_index, repetitions_at_index = locations[index], repetitions[index]
                     total_reads = [sum(x) for x in zip(total_reads,repetitions_at_index)]
-                    print(f"Debug: deleting nonchimeric location {location_at_index}")
                     del final_readout_dict[reference_chromosome][aligned_chromosome][location_at_index]
 
                 final_readout_dict[reference_chromosome][aligned_chromosome][chimeric_site_positive_coordinates] = total_reads
-                
-                # Debug: Print state after processing each chimeric site
-                print(f"Debug: State after processing chimeric site {chimeric_site}: {final_readout_dict[reference_chromosome][aligned_chromosome]}")
-
-    # Debug: Print final state of final_readout_dict
-    print(f"Debug: Final state of final_readout_dict: {final_readout_dict}")
     
     print("Compression complete")
     return final_readout_dict
@@ -380,10 +341,6 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
     Filters the readout dictionary based on coverage and calculates the confidence score
     '''
     print("Filtering and scoring starts")
-    
-    # Debug: Print input parameters
-    print(f"Debug: Input parameters - threshold_probability: {threshold_probability}, stringency: {stringency}")
-    print(f"Debug: Input readout_dict: {readout_dict}")
     
     run_command(f'samtools depth {folder_insertion}/{bam_file} > {temp_folder}/total_coverage.cov', shell=True)
     
@@ -405,9 +362,6 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
         spurious_threshold = poisson.ppf(float(1 - threshold_probability), read_depth)
         print(f"spurious threshold is {spurious_threshold}, proceeding to scoring...")
 
-        # Debug: Print initial state of editable_readout
-        print(f"Debug: Initial state of editable_readout: {editable_readout}")
-
         with open(f"{temp_folder}/confidence.bed", "w+") as bed:
             for read_chromosome, alignments in readout_dict.items():
                 for alignment_chromosome, sites in alignments.items():
@@ -422,9 +376,6 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
                         except ZeroDivisionError:
                             editable_readout[read_chromosome][alignment_chromosome][site].append("inf")
                         
-                        # Debug: Print each site's score
-                        print(f"Debug: Score for {read_chromosome}, {alignment_chromosome}, {site}: {editable_readout[read_chromosome][alignment_chromosome][site][-1]}")
-
         print("confidence score calculated, moving to coverage mapping...")
         run_command(f'samtools depth -b {temp_folder}/confidence.bed {folder_insertion}/{bam_file} > {temp_folder}/confidence.cov', shell=True)
 
@@ -435,9 +386,6 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
                 if int(fields[2]) >= spurious_threshold:
                     to_delete.append((fields[0], fields[1]))
 
-        # Debug: Print sites to be deleted
-        print(f"Debug: Sites to be deleted due to high coverage: {to_delete}")
-
         print("coverage mapping complete, moving to pruning high-coverage areas...")
         for read_chromosome, alignments in readout_dict.items():
             for alignment_chromosome, sites in alignments.items():
@@ -446,9 +394,6 @@ def filterAndScore(temp_folder, folder_insertion, bam_file, readout_dict, thresh
                     if current_site in to_delete:
                         print(f"pruning the site aligned to the {alignment_chromosome} untargeted edit and {read_chromosome} on the genome at coordinate {site}")
                         del editable_readout[read_chromosome][alignment_chromosome][site]
-
-        # Debug: Print final state of editable_readout
-        print(f"Debug: Final state of editable_readout: {editable_readout}")
 
         print("Filtering and scoring complete")
         return [readout_dict, editable_readout]
@@ -472,10 +417,10 @@ def readout(folder, insertion_dict, chr_filter, min_matches=1):
                 logging.debug(f"Processing read_chromosome: {read_chromosome}")
                 if alignments is not None and alignments != {}:
                     for align_chr, sites in alignments.items():
-                        logging.debug(f"  Aligned chromosome: {align_chr}")
+                        logging.debug(f"Aligned chromosome: {align_chr}")
                         if sites != {}:
                             if align_chr in chr_filter:
-                                logging.debug(f"    Skipping {align_chr} (in chr_filter)")
+                                logging.debug(f"Skipping {align_chr} (in chr_filter)")
                                 continue
                             else:
                                 for site, repetitions in sites.items():
@@ -487,7 +432,7 @@ def readout(folder, insertion_dict, chr_filter, min_matches=1):
                                             location = str(site)
                                         line = f"{align_chr},{location},{read_chromosome},{nonchimeric_reads},{chimeric_reads},{score}\n"
                                         file.write(line)
-                                        logging.debug(f"    Writing: {line.strip()}")
+                                        logging.debug(f"Writing: {line.strip()}")
 
         logging.info("Finished writing readout file")
         
@@ -529,10 +474,11 @@ def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
     run_command(f"bcftools isec -p {temp_folder}/dir {temp_folder}/{vcf_1}.gz {temp_folder}/{vcf_2}.gz", shell=True)
     run_command(f"mv {temp_folder}/dir/0001.vcf {folder}/{isec}", shell=True)
 
+def is_chimeric_alignment(ref_name1, ref_name2, markers):
+    # Returns True if exactly one of the reference names is in markers
+    return (ref_name1 in markers) != (ref_name2 in markers)
+
 def check_chimeric_and_alternative_alignments(read, markers):
-    '''
-    Check if a read has chimeric or alternative alignments related to any of the markers
-    '''
     # Check SA (Supplementary Alignment) tag
     sa_tag = dict(read.tags).get('SA')
     if sa_tag:
@@ -541,7 +487,7 @@ def check_chimeric_and_alternative_alignments(read, markers):
             if sa:
                 sa_parts = sa.split(',')
                 chimeric_ref_name = sa_parts[0]
-                if (chimeric_ref_name in markers) != (read.reference_name in markers):
+                if is_chimeric_alignment(chimeric_ref_name, read.reference_name, markers):
                     return True, "SA"
 
     # Check XA (Alternative Hits) tag
@@ -552,80 +498,37 @@ def check_chimeric_and_alternative_alignments(read, markers):
             if xa:
                 xa_parts = xa.split(',')
                 alt_ref_name = xa_parts[0]
-                if (alt_ref_name in markers) != (read.reference_name in markers):
+                if is_chimeric_alignment(alt_ref_name, read.reference_name, markers):
                     return True, "XA"
 
     return False, None
 
-def is_marker_related_softclip(read, markers, reference, min_length=20):
-    """
-    Check if the soft-clipped portion of the read has an exact match of at least
-    20 bases with any marker.
-    
-    Args:
-    - read: pysam aligned segment
-    - markers: list of marker names
-    - reference: pysam FastaFile object of the reference genome
-    - min_length: minimum length of soft-clip to consider (default: 20)
-    
-    Returns:
-    - Boolean indicating if the read has a marker-related soft-clip
-    """
-    cigar = read.cigartuples
-    if cigar is None or len(cigar) < 2:
-        return False
-    
-    # Extract soft-clipped sequences
-    left_soft_clip = read.query_sequence[:cigar[0][1]] if cigar[0][0] == 4 else ""
-    right_soft_clip = read.query_sequence[-cigar[-1][1]:] if cigar[-1][0] == 4 else ""
-    
-    soft_clips = [sc for sc in [left_soft_clip, right_soft_clip] if len(sc) >= min_length]
-    
-    if not soft_clips:
-        return False
-    
-    for marker in markers:
-        marker_seq = reference.fetch(marker)
-        for soft_clip in soft_clips:
-            if soft_clip in marker_seq:
-                return True
-    
-    return False
-
-def process_file(input_file, output_file, reference_file, markers, threads, max_mem):
+def process_file(input_file, output_file, markers, threads, max_mem):
     resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
     
-    counts = {"SA_chimeric": 0, "XA_alternative": 0, "marker_related_softclip": 0}
+    counts = {"SA_chimeric": 0, "XA_alternative": 0}
     
     try:
         with pysam.AlignmentFile(input_file, "r") as infile, \
-             pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile, \
-             pysam.FastaFile(reference_file) as reference:
+             pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
             
             for read in infile:
                 if read.is_unmapped:
                     continue
                 
                 is_chimeric, tag_type = check_chimeric_and_alternative_alignments(read, markers)
-                is_marker_related_clip = is_marker_related_softclip(read, markers, reference)
-                
-                if is_chimeric or is_marker_related_clip:
+                if is_chimeric:
                     outfile.write(read)
-                    if is_chimeric:
-                        if tag_type == "SA":
-                            counts["SA_chimeric"] += 1
-                            logging.debug(f"SA chimeric alignment found: Read ID: {read.query_name}, "
-                                          f"Primary ref: {read.reference_name}, "
-                                          f"Supplementary ref: {dict(read.tags).get('SA', '').split(',')[0]}")
-                        elif tag_type == "XA":
-                            counts["XA_alternative"] += 1
-                            logging.debug(f"XA alternative alignment found: Read ID: {read.query_name}, "
-                                          f"Primary ref: {read.reference_name}, "
-                                          f"Alternative ref: {dict(read.tags).get('XA', '').split(',')[0]}")
-                    if is_marker_related_clip:
-                        counts["marker_related_softclip"] += 1
-                        logging.debug(f"Marker-related soft-clipped read found: Read ID: {read.query_name}, "
-                                      f"Reference: {read.reference_name}")
+                    if tag_type == "SA":
+                        counts["SA_chimeric"] += 1
+                        logging.debug(f"SA chimeric alignment found: Read ID: {read.query_name}, "
+                                      f"Primary ref: {read.reference_name}, "
+                                      f"Supplementary ref: {dict(read.tags).get('SA', '').split(',')[0]}")
+                    elif tag_type == "XA":
+                        counts["XA_alternative"] += 1
+                        logging.debug(f"XA alternative alignment found: Read ID: {read.query_name}, "
+                                      f"Primary ref: {read.reference_name}, "
+                                      f"Alternative ref: {dict(read.tags).get('XA', '').split(',')[0]}")
 
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
@@ -635,5 +538,4 @@ def process_file(input_file, output_file, reference_file, markers, threads, max_
 
     logging.info(f"Total SA chimeric reads found: {counts['SA_chimeric']}")
     logging.info(f"Total XA alternative reads found: {counts['XA_alternative']}")
-    logging.info(f"Total marker-related soft-clipped reads found: {counts['marker_related_softclip']}")
     return counts

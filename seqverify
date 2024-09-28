@@ -402,7 +402,6 @@ if args.start == "markers" or args.start == "all":
                 total_counts = process_file(
                     input_file=f"{temp_folder}/{aligned_with_markers}",
                     output_file=f"{temp_folder}/{aligned_diff_chr}",
-                    reference_file=f"{temp_folder}/{genome_with_markers}",
                     markers=markers,
                     threads=threads,
                     max_mem=max_mem
