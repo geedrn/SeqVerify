@@ -521,14 +521,8 @@ def process_file(input_file, output_file, markers, threads, max_mem):
                     outfile.write(read)
                     if tag_type == "SA":
                         counts["SA_chimeric"] += 1
-                        logging.debug(f"SA chimeric alignment found: Read ID: {read.query_name}, "
-                                      f"Primary ref: {read.reference_name}, "
-                                      f"Supplementary ref: {dict(read.tags).get('SA', '').split(',')[0]}")
                     elif tag_type == "XA":
                         counts["XA_alternative"] += 1
-                        logging.debug(f"XA alternative alignment found: Read ID: {read.query_name}, "
-                                      f"Primary ref: {read.reference_name}, "
-                                      f"Alternative ref: {dict(read.tags).get('XA', '').split(',')[0]}")
 
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
