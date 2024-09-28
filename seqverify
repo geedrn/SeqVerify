@@ -399,7 +399,14 @@ if args.start == "markers" or args.start == "all":
                 logging.info(f"Processing file: {aligned_with_markers}")
                 #parameters: input_file, output_file, markers, num_threads, max_mem_per_process
                 #process_file is made upon the pysam library
-                total_counts = process_file(f"{temp_folder}/{aligned_with_markers}", f"{temp_folder}/{aligned_diff_chr}", marker, threads, max_mem)
+                total_counts = process_file(
+                    input_file=f"{temp_folder}/{aligned_with_markers}",
+                    output_file=f"{temp_folder}/{aligned_diff_chr}",
+                    reference_file=f"{temp_folder}/{genome_with_markers}",
+                    markers=markers,
+                    threads=threads,
+                    max_mem=max_mem
+                )
 
             except Exception as e:
                 logging.error(f"Failed to process alignments for marker {marker}: {str(e)}")

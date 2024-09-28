@@ -530,6 +530,9 @@ def compare(vcf_1, vcf_2, min_quality, temp_folder, folder, stats, isec):
     run_command(f"mv {temp_folder}/dir/0001.vcf {folder}/{isec}", shell=True)
 
 def check_chimeric_and_alternative_alignments(read, markers):
+    '''
+    Check if a read has chimeric or alternative alignments related to any of the markers
+    '''
     # Check SA (Supplementary Alignment) tag
     sa_tag = dict(read.tags).get('SA')
     if sa_tag:
@@ -538,8 +541,7 @@ def check_chimeric_and_alternative_alignments(read, markers):
             if sa:
                 sa_parts = sa.split(',')
                 chimeric_ref_name = sa_parts[0]
-                if (chimeric_ref_name in markers and read.reference_name not in markers) or \
-                   (chimeric_ref_name not in markers and read.reference_name in markers):
+                if (chimeric_ref_name in markers) != (read.reference_name in markers):
                     return True, "SA"
 
     # Check XA (Alternative Hits) tag
@@ -550,38 +552,80 @@ def check_chimeric_and_alternative_alignments(read, markers):
             if xa:
                 xa_parts = xa.split(',')
                 alt_ref_name = xa_parts[0]
-                if (alt_ref_name in markers and read.reference_name not in markers) or \
-                   (alt_ref_name not in markers and read.reference_name in markers):
+                if (alt_ref_name in markers) != (read.reference_name in markers):
                     return True, "XA"
 
     return False, None
 
-def process_file(input_file, output_file, markers, threads, max_mem):
+def is_marker_related_softclip(read, markers, reference, min_length=20):
+    """
+    Check if the soft-clipped portion of the read has an exact match of at least
+    20 bases with any marker.
+    
+    Args:
+    - read: pysam aligned segment
+    - markers: list of marker names
+    - reference: pysam FastaFile object of the reference genome
+    - min_length: minimum length of soft-clip to consider (default: 20)
+    
+    Returns:
+    - Boolean indicating if the read has a marker-related soft-clip
+    """
+    cigar = read.cigartuples
+    if cigar is None or len(cigar) < 2:
+        return False
+    
+    # Extract soft-clipped sequences
+    left_soft_clip = read.query_sequence[:cigar[0][1]] if cigar[0][0] == 4 else ""
+    right_soft_clip = read.query_sequence[-cigar[-1][1]:] if cigar[-1][0] == 4 else ""
+    
+    soft_clips = [sc for sc in [left_soft_clip, right_soft_clip] if len(sc) >= min_length]
+    
+    if not soft_clips:
+        return False
+    
+    for marker in markers:
+        marker_seq = reference.fetch(marker)
+        for soft_clip in soft_clips:
+            if soft_clip in marker_seq:
+                return True
+    
+    return False
+
+def process_file(input_file, output_file, reference_file, markers, threads, max_mem):
     resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
     
-    counts = {"SA_chimeric": 0, "XA_alternative": 0}
+    counts = {"SA_chimeric": 0, "XA_alternative": 0, "marker_related_softclip": 0}
     
     try:
         with pysam.AlignmentFile(input_file, "r") as infile, \
-             pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile:
+             pysam.AlignmentFile(output_file, "w", template=infile, threads=threads) as outfile, \
+             pysam.FastaFile(reference_file) as reference:
             
             for read in infile:
                 if read.is_unmapped:
                     continue
                 
                 is_chimeric, tag_type = check_chimeric_and_alternative_alignments(read, markers)
-                if is_chimeric:
+                is_marker_related_clip = is_marker_related_softclip(read, markers, reference)
+                
+                if is_chimeric or is_marker_related_clip:
                     outfile.write(read)
-                    if tag_type == "SA":
-                        counts["SA_chimeric"] += 1
-                        logging.debug(f"SA chimeric alignment found: Read ID: {read.query_name}, "
-                                      f"Primary ref: {read.reference_name}, "
-                                      f"Supplementary ref: {dict(read.tags).get('SA', '').split(',')[0]}")
-                    elif tag_type == "XA":
-                        counts["XA_alternative"] += 1
-                        logging.debug(f"XA alternative alignment found: Read ID: {read.query_name}, "
-                                      f"Primary ref: {read.reference_name}, "
-                                      f"Alternative ref: {dict(read.tags).get('XA', '').split(',')[0]}")
+                    if is_chimeric:
+                        if tag_type == "SA":
+                            counts["SA_chimeric"] += 1
+                            logging.debug(f"SA chimeric alignment found: Read ID: {read.query_name}, "
+                                          f"Primary ref: {read.reference_name}, "
+                                          f"Supplementary ref: {dict(read.tags).get('SA', '').split(',')[0]}")
+                        elif tag_type == "XA":
+                            counts["XA_alternative"] += 1
+                            logging.debug(f"XA alternative alignment found: Read ID: {read.query_name}, "
+                                          f"Primary ref: {read.reference_name}, "
+                                          f"Alternative ref: {dict(read.tags).get('XA', '').split(',')[0]}")
+                    if is_marker_related_clip:
+                        counts["marker_related_softclip"] += 1
+                        logging.debug(f"Marker-related soft-clipped read found: Read ID: {read.query_name}, "
+                                      f"Reference: {read.reference_name}")
 
     except Exception as e:
         logging.error(f"Critical error processing file: {str(e)}")
@@ -591,5 +635,5 @@ def process_file(input_file, output_file, markers, threads, max_mem):
 
     logging.info(f"Total SA chimeric reads found: {counts['SA_chimeric']}")
     logging.info(f"Total XA alternative reads found: {counts['XA_alternative']}")
+    logging.info(f"Total marker-related soft-clipped reads found: {counts['marker_related_softclip']}")
     return counts
-
