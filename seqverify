@@ -151,8 +151,8 @@ if args.download_defaults: #If --download_defaults is set, downloads the three d
 
     #Downloads GRCh38 version 105 primary assembly (no alt contigs) as a reference genome for the variant calling
     print("Downloading hg38 assembly fasta file")
-    run_command('curl -OJX GET "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz" --output-dir seqverify_defaults')
-    run_command('gunzip seqverify_defaults/hg38.fa.gz')
+    run_command('curl -OJX GET "https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz" --output-dir seqverify_defaults')
+    run_command('gunzip seqverify_defaults/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz')
 
     #Downloads a KRAKEN-valid 8GB database, PlusPF_8GB
     print("Making seqverify_defaults/seqverify_database")
@@ -758,7 +758,7 @@ if args.start == "snp_filtering" or args.start == "all":
         #Run snpEff
         print("Running snpEff for variant annotation")
         logging.info("Running snpEff for variant annotation")
-        snpeff_cmd = f"snpEff -dataDir seqverify_defaults -v hg38 -stats {temp_folder}/snpeff_summary.html -csvStats {temp_folder}/snpeff_summary.csv {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}"
+        snpeff_cmd = f"snpEff -dataDir seqverify_defaults -v GRCh38.105 -stats {temp_folder}/snpeff_summary.html -csvStats {temp_folder}/snpeff_summary.csv {temp_folder}/{variant_vcf} > {temp_folder}/{variant_vcf_ann}"
         run_command(snpeff_cmd)
 
         #Check if snpEff output file was created
